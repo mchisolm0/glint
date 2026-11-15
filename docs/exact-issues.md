@@ -34,7 +34,7 @@ Any Rust source that wraps a native library producing files would hit the same w
 
 ### What we built
 
-Glint: ⌃⌥⌘3 captures the screen and ⌃⌥⌘4 drags out an area. A menu bar item does the same. Captures are listed, previewed and copied to the clipboard. One Contract file, a Rust data crate, about 50 lines of `app.ts`, and one Swift module. Runs on macOS; `exact test macos` passes.
+Glint: ⌃⌥⇧⌘3 captures the screen and ⌃⌥⇧⌘4 drags out an area. A menu bar item does the same. Captures are listed, previewed and copied to the clipboard. One Contract file, a Rust data crate, about 50 lines of `app.ts`, and one Swift module. Runs on macOS; `exact test macos` passes.
 
 ### What Exact covered
 

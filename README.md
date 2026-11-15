@@ -6,8 +6,8 @@ Spike status: works on macOS. Linux is blocked on Exact's Linux host (see [docs/
 
 | Shortcut | Does |
 |---|---|
-| ⌃⌥⌘3 | Capture the screen |
-| ⌃⌥⌘4 | Drag out an area (Escape cancels) |
+| ⌃⌥⇧⌘3 | Capture the screen |
+| ⌃⌥⇧⌘4 | Drag out an area (Escape cancels) |
 
 Each capture is saved, listed, selected and copied to the clipboard.
 

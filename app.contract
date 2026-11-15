@@ -29,12 +29,12 @@ shape Reply
   ok: bool
   error: string
 
-fn keysLine(screen: GlobalShortcut, area: GlobalShortcut): string = screen.registered and area.registered ? "⌃⌥⌘3 screen · ⌃⌥⌘4 area" : "A shortcut is taken by another app; use the menu bar item."
+fn keysLine(screen: GlobalShortcut, area: GlobalShortcut): string = screen.registered and area.registered ? "⌃⌥⇧⌘3 screen · ⌃⌥⇧⌘4 area" : "A shortcut is taken by another app; use the menu bar item."
 
 component Glint
   resource captures = captures() as shape Capture[] else empty()
-  resource screenKey = globalShortcut(id="screen", keys="Control+Alt+Meta+3") as shape GlobalShortcut else empty(id="screen", keys="Control+Alt+Meta+3", registered=false)
-  resource areaKey = globalShortcut(id="area", keys="Control+Alt+Meta+4") as shape GlobalShortcut else empty(id="area", keys="Control+Alt+Meta+4", registered=false)
+  resource screenKey = globalShortcut(id="screen", keys="Control+Alt+Shift+Meta+3") as shape GlobalShortcut else empty(id="screen", keys="Control+Alt+Shift+Meta+3", registered=false)
+  resource areaKey = globalShortcut(id="area", keys="Control+Alt+Shift+Meta+4") as shape GlobalShortcut else empty(id="area", keys="Control+Alt+Shift+Meta+4", registered=false)
   mutation staged as shape Staged then afterStaged
   mutation shot as shape Capture refreshes captures then afterShot
   mutation area as shape Area then afterArea

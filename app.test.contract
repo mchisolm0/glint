@@ -1,7 +1,7 @@
 test "a new install has no captures and names its shortcuts"
   clock data
   expect text "empty" == "No captures yet."
-  expect text "status-line" == "⌃⌥⌘3 screen · ⌃⌥⌘4 area"
+  expect text "status-line" == "⌃⌥⇧⌘3 screen · ⌃⌥⇧⌘4 area"
 
 test "a capture lands in the list, selected"
   tap "screen"
