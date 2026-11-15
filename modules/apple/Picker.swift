@@ -1,8 +1,8 @@
 // The pick overlay: one borderless window per display over a dimmed desktop. Area mode draws a dragged area with
-// full-screen guides, its size and a pixel loupe; window mode highlights the window under the pointer. Space
-// toggles the two; Escape or a right click cancels.
+// full-screen guides and its size; window mode highlights the window under the pointer. Space toggles the two;
+// Escape or a right click cancels. The overlays are non-activating panels, so picking never brings Glint's main
+// window forward over what the person is capturing.
 import AppKit
-import ScreenCaptureKit
 
 /// What a pick answers, in global top-left points; `window` is 0 unless a window was picked.
 struct Pick {
@@ -41,15 +41,12 @@ final class Picker {
             overlay.orderFrontRegardless()
             if NSMouseInRect(mouse, screen.frame, false) { overlay.makeKey() }
         }
-        NSApp.activate(ignoringOtherApps: true)
+        NSCursor.crosshair.set()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             overlays.forEach { $0.animator().alphaValue = 1 }
         }
         moved(to: mouse)
-        Snapshot.take { [weak self] display, image in
-            self?.overlays.first { $0.display.displayID == display }?.view.snapshot = image
-        }
     }
 
     func cancel() { finish(nil) }
@@ -93,8 +90,9 @@ final class Picker {
     }
 }
 
-/// A borderless window refuses key status by default, and the overlay needs it for Escape and Space.
-private final class PickOverlay: NSWindow {
+/// A borderless panel refuses key status by default, and the overlay needs it for Escape and Space. Being
+/// non-activating, it takes keys without activating Glint, so Glint's other windows stay where they are.
+private final class PickOverlay: NSPanel {
     let display: NSScreen
     let view: PickView
     override var canBecomeKey: Bool { true }
@@ -102,12 +100,14 @@ private final class PickOverlay: NSWindow {
     init(screen: NSScreen, picker: Picker) {
         display = screen
         view = PickView(frame: CGRect(origin: .zero, size: screen.frame.size), screen: screen, picker: picker)
-        super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .screenSaver
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         isReleasedWhenClosed = false
+        hidesOnDeactivate = false
+        acceptsMouseMovedEvents = true
         sharingType = .none
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         appearance = NSAppearance(named: .darkAqua)
@@ -118,16 +118,12 @@ private final class PickOverlay: NSWindow {
 
 /// One display's overlay, drawn with layers so a pointer move redraws only what moved.
 private final class PickView: NSView {
-    /// This display's pixels without Glint's windows, for the loupe; nil until ScreenCaptureKit answers.
-    var snapshot: CGImage? { didSet { refresh(NSEvent.mouseLocation) } }
     private unowned let picker: Picker
     private let screen: NSScreen
     private var start: CGPoint?
     private var area: CGRect?
     private let dim = CAShapeLayer(), edge = CAShapeLayer(), guides = CAShapeLayer()
-    private let loupe = CALayer(), zoomed = CALayer(), center = CALayer()
-    private let readout = CATextLayer(), size = CATextLayer()
-    private static let pixels = 15, zoom: CGFloat = 8
+    private let size = CATextLayer()
 
     init(frame: CGRect, screen: NSScreen, picker: Picker) {
         self.screen = screen
@@ -142,35 +138,12 @@ private final class PickView: NSView {
         guides.lineWidth = 1
         guides.lineDashPattern = [4, 3]
         edge.lineWidth = 1
-        let side = CGFloat(Self.pixels) * Self.zoom
-        loupe.frame = CGRect(x: 0, y: 0, width: side, height: side)
-        loupe.shadowOpacity = 0.45
-        loupe.shadowRadius = 8
-        loupe.shadowOffset = CGSize(width: 0, height: -2)
-        loupe.shadowPath = CGPath(roundedRect: loupe.bounds, cornerWidth: 10, cornerHeight: 10, transform: nil)
-        zoomed.frame = loupe.bounds
-        zoomed.cornerRadius = 10
-        zoomed.masksToBounds = true
-        zoomed.magnificationFilter = .nearest
-        zoomed.backgroundColor = NSColor.black.cgColor
-        zoomed.borderWidth = 1
-        zoomed.borderColor = NSColor.white.withAlphaComponent(0.6).cgColor
-        center.frame = CGRect(x: (side - Self.zoom) / 2 - 0.5, y: (side - Self.zoom) / 2 - 0.5, width: Self.zoom + 1, height: Self.zoom + 1)
-        center.borderWidth = 1
-        center.borderColor = NSColor.white.cgColor
-        loupe.addSublayer(zoomed)
-        loupe.addSublayer(center)
-        loupe.isHidden = true
-        for label in [readout, size] {
-            label.contentsScale = scale
-            label.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
-            label.cornerRadius = 5
-            label.alignmentMode = .center
-            label.isHidden = true
-        }
-        [dim, edge, guides, loupe, readout, size].forEach { root.addSublayer($0); $0.contentsScale = scale }
+        size.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+        size.cornerRadius = 5
+        size.alignmentMode = .center
+        size.isHidden = true
+        [dim, edge, guides, size].forEach { root.addSublayer($0); $0.contentsScale = scale; $0.actions = Self.still }
         root.actions = Self.still
-        [dim, edge, guides, loupe, zoomed, center, readout, size].forEach { $0.actions = Self.still }
     }
 
     required init?(coder: NSCoder) { fatalError("not from a nib") }
@@ -195,7 +168,11 @@ private final class PickView: NSView {
         area = nil
     }
 
-    override func mouseMoved(with event: NSEvent) { picker.moved(to: NSEvent.mouseLocation) }
+    // Cursor rects apply only in the active app, and the overlay never activates Glint.
+    override func mouseMoved(with event: NSEvent) {
+        NSCursor.crosshair.set()
+        picker.moved(to: NSEvent.mouseLocation)
+    }
     override func mouseExited(with event: NSEvent) { picker.moved(to: NSEvent.mouseLocation) }
 
     override func mouseDown(with event: NSEvent) {
@@ -258,8 +235,6 @@ private final class PickView: NSView {
         size.isHidden = true
         if picker.mode == .window {
             guides.path = nil
-            loupe.isHidden = true
-            readout.isHidden = true
             if let target = picker.hovered {
                 let frame = Desktop.flip(target.frame).offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY)
                 let hole = CGPath(roundedRect: frame, cornerWidth: 10, cornerHeight: 10, transform: nil)
@@ -287,8 +262,6 @@ private final class PickView: NSView {
         dim.path = shape
         guard let here else {
             guides.path = nil
-            loupe.isHidden = true
-            readout.isHidden = true
             return
         }
         let x = floor(here.x) + 0.5, y = floor(here.y) + 0.5
@@ -298,28 +271,6 @@ private final class PickView: NSView {
         lines.move(to: CGPoint(x: 0, y: y))
         lines.addLine(to: CGPoint(x: bounds.width, y: y))
         guides.path = lines
-        magnify(at: here)
-    }
-
-    /// The loupe and its readout beside the pointer, flipped away from the display's edges.
-    private func magnify(at p: CGPoint) {
-        let side = loupe.bounds.width, gap: CGFloat = 22
-        let px = Int(p.x * screen.backingScaleFactor), py = Int((bounds.height - p.y) * screen.backingScaleFactor)
-        var text = "\(Int(p.x)), \(Int(bounds.height - p.y))"
-        if let snapshot {
-            let half = Self.pixels / 2
-            zoomed.contents = snapshot.cropping(to: CGRect(x: px - half, y: py - half, width: Self.pixels, height: Self.pixels))
-            if let hex = Self.hex(snapshot, x: px, y: py) { text += "   " + hex }
-        }
-        let labelSize = measure(readout, text)
-        var origin = CGPoint(x: p.x + gap, y: p.y - gap - side)
-        if origin.x + side > bounds.width { origin.x = p.x - gap - side }
-        if origin.y - labelSize.height - 6 < 0 { origin.y = p.y + gap + labelSize.height + 6 }
-        loupe.isHidden = snapshot == nil
-        loupe.frame.origin = origin
-        let below = snapshot == nil ? CGPoint(x: p.x + gap, y: p.y - gap - labelSize.height) : CGPoint(x: origin.x + (side - labelSize.width) / 2, y: origin.y - labelSize.height - 6)
-        readout.frame = CGRect(origin: below, size: labelSize)
-        readout.isHidden = false
     }
 
     /// `label` below `rect`, or inside its bottom when the display ends there.
@@ -341,45 +292,5 @@ private final class PickView: NSView {
         let s = string.size()
         // CATextLayer draws from the top; padding the frame and the baseline offset come out even at 11 pt.
         return CGSize(width: ceil(s.width) + 14, height: ceil(s.height) + 6)
-    }
-
-    /// The pixel's colour as `#RRGGBB`, read from the snapshot (top-left pixel coordinates).
-    private static func hex(_ image: CGImage, x: Int, y: Int) -> String? {
-        guard x >= 0, y >= 0, x < image.width, y < image.height,
-              let pixel = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)),
-              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        var rgba = [UInt8](repeating: 0, count: 4)
-        let drawn = rgba.withUnsafeMutableBytes { bytes -> Bool in
-            guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                          space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            return true
-        }
-        return drawn ? String(format: "#%02X%02X%02X", rgba[0], rgba[1], rgba[2]) : nil
-    }
-}
-
-/// Each display's pixels once, without Glint's windows, for the loupe. Without screen recording permission it
-/// asks nothing and the overlay simply has no loupe.
-private enum Snapshot {
-    static func take(_ each: @escaping (CGDirectDisplayID, CGImage) -> Void) {
-        guard CGPreflightScreenCaptureAccess() else { return }
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, _ in
-            guard let content else { return }
-            let own = content.applications.filter { $0.processID == getpid() }
-            for display in content.displays {
-                let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
-                let config = SCStreamConfiguration()
-                let scale = CGFloat(filter.pointPixelScale)
-                config.width = Int(CGFloat(display.width) * scale)
-                config.height = Int(CGFloat(display.height) * scale)
-                config.showsCursor = false
-                let id = display.displayID
-                SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { image, _ in
-                    guard let image else { return }
-                    DispatchQueue.main.async { each(id, image) }
-                }
-            }
-        }
     }
 }
