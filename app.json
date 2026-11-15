@@ -5,6 +5,14 @@
   "id": "dev.mchisolm0.glint",
   "start_url": "/",
   "display": "standalone",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
   "app": {
     "id": "dev.mchisolm0.glint",
     "name": "Glint"
@@ -12,6 +20,7 @@
   "host": {
     "web": {},
     "macos": {
+      "icon": "art/Glint.icon",
       "minimumOS": "15.0",
       "window": {
         "width": 900,

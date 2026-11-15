@@ -1,0 +1,8 @@
+{
+  "fill": { "solid": "srgb:0.07843,0.08627,0.16471,1.00000" },
+  "groups": [
+    { "layers": [{ "image-name": "glint.svg", "name": "Glint" }] },
+    { "layers": [{ "image-name": "frame.svg", "name": "Frame" }] }
+  ],
+  "supported-platforms": { "squares": "shared" }
+}
