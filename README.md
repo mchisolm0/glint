@@ -1,34 +1,40 @@
 # Glint
 
-A screenshot tool built on [Exact](https://github.com/expo/exact): global shortcuts, a menu bar item, and capture done by a Rust crate ([xcap](https://crates.io/crates/xcap)) so the capture code is the same on every desktop.
+A screenshot and screen-recording tool built on [Exact](https://github.com/expo/exact): global shortcuts, a menu bar
+item, an annotation editor, and capture done in Rust (`glint-capture`) behind one interface, with ScreenCaptureKit
+on the Mac and the desktop portal on Linux.
 
-Spike status: works on macOS. Linux is blocked on Exact's Linux host (see [docs/exact-issues.md](docs/exact-issues.md)).
-
-| Shortcut | Does |
+| Hyper (⌃⌥⇧⌘) + | Does |
 |---|---|
-| ⌃⌥⇧⌘3 | Capture the screen |
-| ⌃⌥⇧⌘4 | Drag out an area (Escape cancels) |
+| 3 | Capture the screen under the pointer |
+| 4 | Drag out an area; Space switches to picking a window; Escape cancels |
+| 5 | Record an area or a display (a click picks the display); again to stop |
+| 2 | Capture text (OCR) to the clipboard |
 
-Each capture is saved, listed, selected and copied to the clipboard.
+After a capture: it is copied, and a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out). The
+editor has arrow, box, ellipse, line, pen, highlighter, text, pixelate, numbered steps, spotlight, crop and a
+background; it saves at the picture's own pixels and stays editable. Recordings are MP4 (system audio and the
+microphone optional) or GIF.
 
 ## Where things live
 
 | Piece | File | Platforms |
 |---|---|---|
-| View, menu bar item, shortcuts | `app.contract` | Contract |
-| Capture (pixels to PNG) | `capture/` (`glint-capture`, wraps xcap) | macOS, Linux, Windows |
-| Capture sources | `data/src/lib.rs` | native hosts |
-| List, keep, copy, delete | `app.ts` | every host |
-| Area overlay | `modules/apple/AreaPicker.swift` | macOS |
+| View, editor, library, settings | `app.contract`, `shapes.contract`, `app.ts` | every host |
+| Capture and recording | `capture/` (`glint-capture`), `data/src/lib.rs` | macOS now; Linux next |
+| Overlays and floating panels | `modules/apple/*.swift` | macOS |
 
-A capture runs in three steps: Rust takes the picture and stages a PNG in `/tmp/glint`, `app.ts` moves it into `app:/data/captures`, then the view lists it and copies it.
+[docs/design.md](docs/design.md) has the interfaces between them.
 
 ## Run
 
-Needs a checkout of `expo/exact` at `../exact`, Bun 1.4.2, and Xcode's `clang` and `swift` first on `PATH`.
+Glint needs Exact's `glint` branch (a Canvas 2D image can name an `app:/` file; host binaries target macOS 14),
+checked out beside it at `../exact-glint` (`git worktree add ../exact-glint glint` in an Exact checkout).
+Bun 1.4.2, and Xcode's `clang` and `swift` first on `PATH`.
 
 ```sh
-bun ../exact/scripts/exact.mjs setup   # once
+export EXACT=../exact-glint
+bun $EXACT/scripts/exact.mjs setup   # once
 bun exact.mjs mac --run
 bun exact.mjs test macos
 ```
