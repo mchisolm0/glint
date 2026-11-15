@@ -1,0 +1,37 @@
+{
+  "$schema": "../exact/scripts/app.schema.json",
+  "name": "Glint",
+  "short_name": "Glint",
+  "id": "dev.mchisolm0.glint",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "dev.mchisolm0.glint",
+    "name": "Glint"
+  },
+  "host": {
+    "web": {},
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 900,
+        "height": 700
+      }
+    },
+    "linux": {}
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "macos": "0",
+      "linux": "0"
+    }
+  },
+  "rust": {
+    "data": {
+      "crate": "glint-data",
+      "type": "glint_data::Glint"
+    }
+  },
+  "userInterfaceStyle": "dark"
+}

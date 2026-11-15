@@ -1,0 +1,127 @@
+// Glint: screenshots from a global shortcut or the menu bar item.
+// data/src/lib.rs takes the pictures with xcap; app.ts lists, copies and deletes them;
+// modules/apple/AreaPicker.swift draws the area overlay on the Mac.
+use globalShortcut, globalshortcut, GlobalShortcut from "@exact/global-shortcuts"
+
+// A picture Rust just took, waiting in the staging folder for app.ts to keep it.
+shape Staged
+  path: string
+  taken: number
+  width: number
+  height: number
+
+shape Capture
+  path: string
+  name: string
+  taken: number
+  width: number
+  height: number
+
+// A rectangle in the desktop's global points, origin top-left. `picked` is false when Escape cancelled.
+shape Area
+  picked: bool
+  x: number
+  y: number
+  width: number
+  height: number
+
+shape Reply
+  ok: bool
+  error: string
+
+fn keysLine(screen: GlobalShortcut, area: GlobalShortcut): string = screen.registered and area.registered ? "⌃⌥⌘3 screen · ⌃⌥⌘4 area" : "A shortcut is taken by another app; use the menu bar item."
+
+component Glint
+  resource captures = captures() as shape Capture[] else empty()
+  resource screenKey = globalShortcut(id="screen", keys="Control+Alt+Meta+3") as shape GlobalShortcut else empty(id="screen", keys="Control+Alt+Meta+3", registered=false)
+  resource areaKey = globalShortcut(id="area", keys="Control+Alt+Meta+4") as shape GlobalShortcut else empty(id="area", keys="Control+Alt+Meta+4", registered=false)
+  mutation staged as shape Staged then afterStaged
+  mutation shot as shape Capture refreshes captures then afterShot
+  mutation area as shape Area then afterArea
+  mutation copied as shape Reply
+  mutation removed as shape Reply refreshes captures
+  state selected = ""
+  derive current = first(captures.filter(c => c.path == selected))
+  derive busy = pending(staged) or pending(shot) or pending(area)
+  derive problem = match failure(staged) { case some(f) => `Capture failed: ${f.message}`, case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(area) { case some(f) => `Area picker failed: ${f.message}`, case none => "" } } }
+  action screen
+    if not busy
+      send staged = captureScreen()
+  action pick
+    if not busy
+      send area = pickArea()
+  action afterArea
+    match area
+      case some(a)
+        if a.picked
+          send staged = captureArea(a.x, a.y, a.width, a.height)
+      case none
+        selected = selected
+  action afterStaged
+    match staged
+      case some(s)
+        send shot = keepCapture(s.path, s.taken, s.width, s.height)
+      case none
+        selected = selected
+  action afterShot
+    match shot
+      case some(c)
+        selected = c.path
+        send copied = copyCapture(c.path)
+      case none
+        selected = selected
+  action pressed(id: string)
+    if id == "area"
+      pick()
+    else
+      screen()
+  action choose(path: string)
+    selected = path
+  action copy
+    send copied = copyCapture(selected)
+  action remove
+    send removed = deleteCapture(selected)
+    selected = ""
+  action open
+    focus()
+  view
+    column globalshortcut=pressed width="100%" height="100%"
+      button -exact-menu="status" aria-label="Glint" popovertarget="glint-menu" testId="status"
+        image (busy ? "symbol:sf/circle.dashed" : "symbol:sf/camera.viewfinder")
+      column id="glint-menu" popover="auto" role="menu" aria-label="Glint"
+        button press=screen testId="menu-screen"
+          text "Capture Screen"
+        button press=pick testId="menu-area"
+          text "Capture Area"
+        hr
+        button press=open testId="menu-open"
+          text "Open Glint"
+      row gap=8 padding=8 align-items="center" border-bottom="1px solid -exact-separator"
+        button press=screen disabled=busy testId="screen"
+          text "Screen"
+        button press=pick disabled=busy testId="area"
+          text "Area"
+        text (problem != "" ? problem : keysLine(screenKey, areaKey)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
+      row flex=1 min-height=0
+        scroll width=220 border-right="1px solid -exact-separator"
+          column testId="list"
+            if captures.length == 0
+              text "No captures yet." padding=8 font-size=12 color="-exact-secondary-label" testId="empty"
+            for c in captures key=c.path
+              button press=choose(c.path) padding=6 gap=8 display="flex" align-items="center" background-color=(c.path == selected ? "-exact-fill" : "transparent") testId=`row-${c.name}`
+                image c.path width=56 height=36 object-fit="cover"
+                column flex=1 min-width=0 align-items="flex-start"
+                  text formatDate(c.taken, 0, "medium") font-size=12
+                  text `${c.width}×${c.height}` font-size=11 color="-exact-secondary-label"
+        column flex=1 min-width=0 padding=8 gap=8
+          match current
+            case some(c)
+              row gap=8 align-items="center"
+                text c.name flex=1 font-size=12 color="-exact-secondary-label" testId="current"
+                button press=copy testId="copy"
+                  text "Copy"
+                button press=remove testId="delete"
+                  text "Delete"
+              image c.path width="100%" flex=1 min-height=0 object-fit="contain" testId="preview"
+            case none
+              text "Pick a capture." color="-exact-secondary-label" testId="hint"

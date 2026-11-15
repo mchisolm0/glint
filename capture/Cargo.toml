@@ -1,0 +1,12 @@
+[package]
+name = "glint-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+workspace = "../.exact/shells"
+
+# xcap does the platform work: CoreGraphics on macOS, X11 or the xdg portal on Linux, DXGI on Windows.
+[dependencies]
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
