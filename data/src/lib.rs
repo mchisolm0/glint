@@ -14,7 +14,7 @@ mod shapes {
 }
 
 /// The sources this crate answers; app.ts answers the rest.
-pub const RUST_SOURCES: &[&str] = &["captureScreen", "captureArea", "captureWindow", "startRecording", "stopRecording"];
+pub const RUST_SOURCES: &[&str] = &["captureScreen", "captureArea", "captureWindow", "startRecording", "stopRecording", "platform"];
 
 /// Answers the capture sources. It holds the recording between `startRecording` and `stopRecording`.
 #[derive(Default)]
@@ -25,7 +25,7 @@ pub struct Glint {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use crate::shapes::{ContractValue, Recording, Staged};
+    use crate::shapes::{ContractValue, Platform, Recording, Staged};
     use exact_runner::Value;
     use glint_capture::{RecordOptions, Rect, Shot, VideoKind};
     use std::path::{Path, PathBuf};
@@ -62,6 +62,16 @@ mod native {
         }
     }
 
+    /// Under the agent (the app's tests) nobody answers the desktop's picker, so an empty area is the fixed one
+    /// the Mac's module picks there (modules/apple/Glint.swift).
+    fn stand_in(rect: Rect) -> Rect {
+        let empty = rect.width < 1.0 || rect.height < 1.0;
+        match empty && std::env::var("EXACT_AGENT").as_deref() == Ok("1") {
+            true => Rect { x: 100.0, y: 100.0, width: 400.0, height: 300.0 },
+            false => rect,
+        }
+    }
+
     fn now() -> f64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
     }
@@ -95,8 +105,10 @@ mod native {
     pub(crate) fn run(live: &mut Option<Live>, source: &str, args: &[Value]) -> Result<Value, String> {
         let args = Args(args);
         match source {
+            // Where the app runs, so the view leaves out the Mac's panels and menu bar item elsewhere.
+            "platform" => Ok(Platform { os: std::env::consts::OS.into() }.to_value()),
             "captureScreen" => shot(glint_capture::screen),
-            "captureArea" => shot(|to| glint_capture::area(args.rect(0), to)),
+            "captureArea" => shot(|to| glint_capture::area(stand_in(args.rect(0)), to)),
             "captureWindow" => shot(|to| glint_capture::window(args.number(0) as u32, to)),
             "startRecording" => {
                 if live.is_some() {

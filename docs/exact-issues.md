@@ -111,3 +111,32 @@ GIF recording. One Contract file, ~300 lines of `app.ts`, a Rust capture crate, 
   again fixed it both times.
 
 Related: #503 (a screenshot annotation tool on Windows).
+
+---
+
+## 6. Running Glint end to end on GNOME 50 (Wayland)
+
+From a private headless GNOME 50 session on Fedora 44 (`glint` branch `0bcaaed72` plus the fix below). Screen, area
+and window capture, the clipboard, the editor and save, MP4 and GIF recording with the ScreenCast restore token, and
+the global shortcuts all work. What got in the way:
+
+- **`native.available` is true on Linux with no app module.** The painted host installs a hosted handler for its
+  packages (`presenter/requests.rs` `handle_modules`), and `door.rs` answers `available` from `state.hosted`, so app
+  code that gates its own module on `available` sends it calls that fail (`later`: `NotSupportedError`; `call`: "the
+  app's module answers no native.call"). Glint's file moves silently went nowhere. Glint now asks the module once with
+  a `call`. `available` meaning "a module answers the app's calls" would match the docs.
+- **The window's app id was the binary's name** (`glint`), so GNOME matched no desktop entry (generic icon, no app
+  name). Fixed on the branch: the Wayland app id and X11 class are the app's id (`host/linux/src/display/window.rs`).
+  The title is still the binary's stem (`glint`), not `app.name`, and the desktop entry has no `Icon=`.
+- **Dark mode:** `userInterfaceStyle` is Apple and web only (documented). `color-scheme="dark"` on the root turns the
+  text light but leaves the window's ground white until the root paints `-exact-background`, and a `popover` under
+  that root still draws light until it says `color-scheme="dark"` itself.
+- **Media:** an `image` of a GIF draws nothing and `video` is a blank box (no decoder on the painted host). A recording
+  app on Linux shows no preview.
+- **Packages on Linux:** `@exact/clipboard` copies PNGs and text only (no file, so no way to copy an MP4);
+  `@exact/text-detection` has no Linux implementation (Glint's call answered `NotAllowedError`, which reads like a
+  grant problem rather than a missing platform).
+- **GlobalShortcuts:** GNOME's "Add Keyboard Shortcuts" dialog lists each shortcut by its id (`area`, `record`); a
+  description field would read better there.
+- **SF symbols:** `symbol:sf/*` is blank on Linux and the build says so clearly. Declaring `icon.*` tokens with
+  Material Symbols SVGs in `app.forma` fixed every one, including a computed `` `symbol:icon.${t}` ``.

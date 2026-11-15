@@ -40,12 +40,16 @@ shape Request
   kind: string
   path: string
 
+// Where the app runs (Rust's std::env::consts::OS): "macos" has the floating panels and the menu bar item.
+shape Platform
+  os: string
+
 shape Viewport
   width: number
   height: number
   devicePixelRatio: option<number>
 
-fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut): string = a.registered and b.registered and c.registered and d.registered ? "Hyper 3 screen · 4 area · 5 record · 2 text" : "A shortcut is taken by another app; use the menu bar item."
+fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut, linux: bool): string = a.registered and b.registered and c.registered and d.registered ? (linux ? "Shift+Ctrl+Alt+Super 3 screen · 4 area · 5 record" : "Hyper 3 screen · 4 area · 5 record · 2 text") : linux ? "A shortcut is not set; set them in Settings, Apps, Glint." : "A shortcut is taken by another app; use the menu bar item."
 fn clock(ms: number): string = `${floor(ms / 60000)}:${floor(ms / 1000) % 60 < 10 ? "0" : ""}${floor(ms / 1000) % 60}`
 fn sizeLine(c: Capture): string = c.kind == "png" ? `${c.width}×${c.height}` : `${c.kind.toUpperCase()} ${clock(c.duration)} · ${c.width}×${c.height}`
 // A failure worth showing: a picker the person cancelled is not one.
@@ -60,6 +64,7 @@ component Glint
   resource textKey = globalShortcut(id="text", keys="Control+Alt+Shift+Meta+2") as shape GlobalShortcut else empty(id="text", keys="Control+Alt+Shift+Meta+2", registered=false)
   resource request = requests() as shape Request else empty(seq=0, kind="", path="")
   resource viewport = exactViewport() as shape Viewport
+  resource platform = platform() as shape Platform else empty(os="")
   resource login = loginItemStatus() as shape LoginItemStatus else empty(available=false, state="unknown", hidden=false, launchedAtLogin=false)
   mutation area as shape Area then afterArea
   mutation staged as shape Staged then afterStaged
@@ -93,6 +98,9 @@ component Glint
   state recY = 0
   state recW = 0
   state recH = 0
+  derive onMac = platform.os == "macos"
+  // Linux's host shows PNGs only (no video player or GIF decoder) and copies PNGs and text only.
+  derive onLinux = platform.os == "linux"
   derive current = first(captures.filter(c => c.path == selected))
   derive busy = pending(staged) or pending(shot) or pending(area) or pending(recording)
   derive problem = match failure(staged) { case some(f) => shown("Capture failed", f.message), case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(recording) { case some(f) => shown("Recording failed", f.message), case none => match failure(saved) { case some(f) => `Saving the edit failed: ${f.message}`, case none => match failure(read) { case some(f) => `Text recognition failed: ${f.message}`, case none => "" } } } } }
@@ -160,9 +168,12 @@ component Glint
       picking = "window"
       send area = pick("window")
   action pickText
-    if not busy
-      picking = "text"
-      send area = pick("area")
+    if onLinux
+      note = "No text recognition on Linux yet."
+    else
+      if not busy
+        picking = "text"
+        send area = pick("area")
   action record
     if recordingOn
       stop()
@@ -211,8 +222,8 @@ component Glint
     match shot
       case some(c)
         selected = c.path
-        note = copyAfter ? "Copied" : "Saved"
-        if copyAfter
+        note = copyAfter and (c.kind == "png" or not onLinux) ? "Copied" : "Saved"
+        if copyAfter and (c.kind == "png" or not onLinux)
           send copied = copyCapture(c.shown, c.kind)
         if quickAfter
           send shown = showQuick(c.shown, c.kind)
@@ -440,34 +451,35 @@ component Glint
     recFormat = value
 
   view
-    column globalshortcut=pressed width="100%" height="100%"
-      button -exact-menu="status" aria-label="Glint" popovertarget="glint-menu" testId="status"
-        image (recordingOn ? "symbol:sf/stop.circle.fill" : busy ? "symbol:sf/circle.dashed" : "symbol:sf/camera.viewfinder")
-      column id="glint-menu" popover="auto" role="menu" aria-label="Glint"
-        if recordingOn
-          button press=stop testId="menu-stop"
-            text "Stop Recording"
+    column globalshortcut=pressed width="100%" height="100%" color-scheme="dark" background-color="-exact-background"
+      if onMac
+        button -exact-menu="status" aria-label="Glint" popovertarget="glint-menu" testId="status"
+          image (recordingOn ? "symbol:icon.stop" : busy ? "symbol:icon.busy" : "symbol:icon.capture")
+        column id="glint-menu" popover="auto" role="menu" aria-label="Glint"
+          if recordingOn
+            button press=stop testId="menu-stop"
+              text "Stop Recording"
+            hr
+          button press=screen testId="menu-screen"
+            text "Capture Screen"
+          button press=pickArea testId="menu-area"
+            text "Capture Area"
+          button press=pickWindow testId="menu-window"
+            text "Capture Window"
+          button press=pickText testId="menu-text"
+            text "Capture Text"
+          if not recordingOn
+            button press=record testId="menu-record"
+              text "Record Screen"
           hr
-        button press=screen testId="menu-screen"
-          text "Capture Screen"
-        button press=pickArea testId="menu-area"
-          text "Capture Area"
-        button press=pickWindow testId="menu-window"
-          text "Capture Window"
-        button press=pickText testId="menu-text"
-          text "Capture Text"
-        if not recordingOn
-          button press=record testId="menu-record"
-            text "Record Screen"
-        hr
-        button press=open testId="menu-open"
-          text "Open Glint"
+          button press=open testId="menu-open"
+            text "Open Glint"
       if editing != ""
         column flex=1 min-height=0 key=editKey tabindex=0 testId="editor"
           row gap=4 padding=6 align-items="center" border-bottom="1px solid -exact-separator" testId="tools"
             for t in ["arrow", "rect", "ellipse", "line", "pen", "marker", "text", "pixelate", "step", "spotlight", "crop"] key=t
               button press=useTool(t) aria-label=t aria-pressed=(tool == t) padding=4 border-radius=5 background-color=(tool == t ? "-exact-fill" : "transparent") testId=`tool-${t}`
-                image (t == "arrow" ? "symbol:sf/arrow.up.right" : t == "rect" ? "symbol:sf/rectangle" : t == "ellipse" ? "symbol:circle" : t == "line" ? "symbol:sf/line.diagonal" : t == "pen" ? "symbol:sf/scribble" : t == "marker" ? "symbol:sf/highlighter" : t == "text" ? "symbol:sf/textformat" : t == "pixelate" ? "symbol:sf/checkerboard.rectangle" : t == "step" ? "symbol:sf/1.circle" : t == "spotlight" ? "symbol:sf/flashlight.on.fill" : "symbol:sf/crop") width=16 height=16
+                image (t == "ellipse" ? "symbol:circle" : `symbol:icon.${t}`) width=16 height=16
             hr height=18 width=1
             for c in ["#ff3b30", "#ff9500", "#ffcc00", "#34c759", "#0a84ff", "#bf5af2", "#ffffff", "#000000"] key=c
               button press=useColor(c) aria-label=c aria-pressed=(color == c) width=18 height=18 border-radius=9 background-color=c border=(color == c ? "2px solid -exact-label" : "1px solid -exact-separator") testId=`color-${c}`
@@ -483,9 +495,9 @@ component Glint
                 text "Uncrop" font-size=11
             view flex=1
             button press=undo aria-keyshortcuts="Meta+Z" aria-label="Undo" disabled=(marks.length == 0) testId="undo"
-              image "symbol:sf/arrow.uturn.backward" width=14 height=14
+              image "symbol:icon.undo" width=14 height=14
             button press=redo aria-keyshortcuts="Shift+Meta+Z" aria-label="Redo" disabled=(undone.length == 0) testId="redo"
-              image "symbol:sf/arrow.uturn.forward" width=14 height=14
+              image "symbol:icon.redo" width=14 height=14
             button press=cancel testId="cancel"
               text "Cancel"
             button press=save aria-keyshortcuts="Meta+S" disabled=(pending(saved)) testId="save"
@@ -507,21 +519,23 @@ component Glint
               text "Area"
             button press=pickWindow disabled=busy testId="window"
               text "Window"
-            button press=pickText disabled=busy testId="text"
-              text "Text"
+            if not onLinux
+              button press=pickText disabled=busy testId="text"
+                text "Text"
             button press=record disabled=(busy and not recordingOn) testId="record"
               text (recordingOn ? "Stop" : "Record")
-            text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
+            text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey, onLinux)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
             button popovertarget="settings" aria-label="Settings" testId="settings-button"
               image "symbol:settings" width=14 height=14
-            column id="settings" popover="auto" padding=12 gap=8 testId="settings"
+            column id="settings" popover="auto" color-scheme="dark" padding=12 gap=8 testId="settings"
               text "After a capture" font-size=11 color="-exact-secondary-label"
               row gap=6 align-items="center"
                 input type="checkbox" checked=copyAfter change=flipCopy aria-label="Copy to the clipboard" testId="set-copy"
                 text "Copy to the clipboard" font-size=12
-              row gap=6 align-items="center"
-                input type="checkbox" checked=quickAfter change=flipQuick aria-label="Show the floating thumbnail" testId="set-quick"
-                text "Show the floating thumbnail" font-size=12
+              if onMac
+                row gap=6 align-items="center"
+                  input type="checkbox" checked=quickAfter change=flipQuick aria-label="Show the floating thumbnail" testId="set-quick"
+                  text "Show the floating thumbnail" font-size=12
               if login.available
                 row gap=6 align-items="center"
                   input type="checkbox" checked=(login.state == "enabled") change=flipLogin aria-label="Open at login" testId="set-login"
@@ -534,9 +548,10 @@ component Glint
               row gap=6 align-items="center"
                 input type="checkbox" checked=recCursor change=flipCursor aria-label="Show the cursor" testId="set-cursor"
                 text "Show the cursor" font-size=12
-              row gap=6 align-items="center"
-                input type="checkbox" checked=recClicks change=flipClicks aria-label="Highlight clicks" testId="set-clicks"
-                text "Highlight clicks" font-size=12
+              if onMac
+                row gap=6 align-items="center"
+                  input type="checkbox" checked=recClicks change=flipClicks aria-label="Highlight clicks" testId="set-clicks"
+                  text "Highlight clicks" font-size=12
               row gap=6 align-items="center"
                 input type="checkbox" checked=recAudio change=flipAudio aria-label="Record system audio" testId="set-audio"
                 text "Record system audio" font-size=12
@@ -550,9 +565,9 @@ component Glint
                   text "No captures yet." padding=8 font-size=12 color="-exact-secondary-label" testId="empty"
                 for c in captures key=c.path
                   button press=choose(c.path) dblclick=annotate(c.path) padding=6 gap=8 display="flex" align-items="center" background-color=(c.path == selected ? "-exact-fill" : "transparent") testId=`row-${c.name}`
-                    if c.kind == "mp4"
+                    if c.kind == "mp4" or (c.kind == "gif" and onLinux)
                       column width=56 height=36 align-items="center" justify-content="center" background-color="-exact-fill"
-                        image "symbol:sf/video.fill" width=16 height=16 color="-exact-secondary-label"
+                        image "symbol:icon.video" width=16 height=16 color="-exact-secondary-label"
                     else
                       image c.shown width=56 height=36 object-fit="cover"
                     column flex=1 min-width=0 align-items="flex-start"
@@ -566,17 +581,23 @@ component Glint
                     if c.kind == "png"
                       button press=annotate(c.path) testId="annotate"
                         text "Annotate"
-                      button press=pin testId="pin"
-                        text "Pin"
-                    button press=copy aria-keyshortcuts="Meta+C" testId="copy"
-                      text "Copy"
-                    button press=reveal testId="reveal"
-                      text "Show in Finder"
+                      if onMac
+                        button press=pin testId="pin"
+                          text "Pin"
+                    if c.kind == "png" or not onLinux
+                      button press=copy aria-keyshortcuts="Meta+C" testId="copy"
+                        text "Copy"
+                    if onMac
+                      button press=reveal testId="reveal"
+                        text "Show in Finder"
                     button press=remove testId="delete"
                       text "Delete"
-                  if c.kind == "mp4"
-                    video src=c.path controls=true width="100%" flex=1 min-height=0 testId="player"
+                  if c.kind != "png" and onLinux
+                    text "No preview of a recording on Linux yet." color="-exact-secondary-label" testId="no-preview"
                   else
-                    image c.shown width="100%" flex=1 min-height=0 object-fit="contain" testId="preview"
+                    if c.kind == "mp4"
+                      video src=c.path controls=true width="100%" flex=1 min-height=0 testId="player"
+                    else
+                      image c.shown width="100%" flex=1 min-height=0 object-fit="contain" testId="preview"
                 case none
                   text "Pick a capture." color="-exact-secondary-label" testId="hint"

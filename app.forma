@@ -1,0 +1,20 @@
+forma glint
+
+// Glint's icons: SF Symbols on Apple, Material Symbols (Apache 2.0, assets/icons) on Linux and the web.
+icons
+  icon.stop = icon(sf "stop.circle.fill", svg "icons/stop.svg")
+  icon.busy = icon(sf "circle.dashed", svg "icons/busy.svg")
+  icon.capture = icon(sf "camera.viewfinder", svg "icons/capture.svg")
+  icon.arrow = icon(sf "arrow.up.right", svg "icons/arrow.svg")
+  icon.rect = icon(sf "rectangle", svg "icons/rect.svg")
+  icon.line = icon(sf "line.diagonal", svg "icons/line.svg")
+  icon.pen = icon(sf "scribble", svg "icons/pen.svg")
+  icon.marker = icon(sf "highlighter", svg "icons/marker.svg")
+  icon.text = icon(sf "textformat", svg "icons/text.svg")
+  icon.pixelate = icon(sf "checkerboard.rectangle", svg "icons/pixelate.svg")
+  icon.step = icon(sf "1.circle", svg "icons/step.svg")
+  icon.spotlight = icon(sf "flashlight.on.fill", svg "icons/spotlight.svg")
+  icon.crop = icon(sf "crop", svg "icons/crop.svg")
+  icon.undo = icon(sf "arrow.uturn.backward", svg "icons/undo.svg")
+  icon.redo = icon(sf "arrow.uturn.forward", svg "icons/redo.svg")
+  icon.video = icon(sf "video.fill", svg "icons/video.svg")

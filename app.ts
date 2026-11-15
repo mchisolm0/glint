@@ -28,8 +28,23 @@ const render = /^(.+)\.edit-(\d+)\.png$/;
 const ok = { ok: true, error: '' };
 const refused = (e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) });
 
+// Whether the app's own module answers: on Linux `available` is true (the host takes its packages' calls) but
+// no module answers the app's, so the first use asks it once.
+let answers: boolean | undefined;
+
 // The Swift module on the Mac; null where the host has none (Linux, the web, the agent's stand-in without one).
-const mac = (native?: NativeModule | null) => (native?.available ? native : null);
+function mac(native?: NativeModule | null) {
+  if (!native?.available) return null;
+  if (answers === undefined) {
+    try {
+      native.call({ op: 'requests' });
+      answers = true;
+    } catch {
+      answers = false;
+    }
+  }
+  return answers ? native : null;
+}
 
 async function list(storage: Storage) {
   return storage.fs.readdir(folder).catch((e: { code?: string }) => {

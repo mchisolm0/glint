@@ -4,7 +4,7 @@ Three layers, so everything but the platform's windows is shared:
 
 | Layer | Where | Shared with Linux |
 |---|---|---|
-| View, editor, library, settings | `app.contract`, `app.ts` | yes, once Exact's Linux host has a desktop window |
+| View, editor, library, settings | `app.contract`, `app.ts` | yes: the main window is the whole UI on Linux |
 | Capture and recording | `capture/` (`glint-capture`), `data/src/lib.rs` | yes: one interface, a ScreenCaptureKit back end and an xdg-desktop-portal one |
 | Overlays and floating windows | `modules/apple/*.swift` | no: the Linux host draws its own |
 
@@ -36,10 +36,14 @@ points × the display's scale.
 | `captureWindow` | `id` (CGWindowID) | `Staged`, the window alone with its shadow on transparency |
 | `startRecording` | `x, y, width, height, kind, cursor, clicks, audio, microphone` | `Recording`. `width == 0` records the display under the pointer. `kind` is `"mp4"` or `"gif"` |
 | `stopRecording` | none | `Staged` of the finished file |
+| `platform` | none | `{os}`: Rust's `std::env::consts::OS` (`"macos"`, `"linux"`), which hides what a platform lacks |
 
 Glint's own windows (overlays, panels, pins, HUD, main window) are excluded from every capture.
 
 ## Swift module ops (`native.later` unless marked `call`)
+
+`app.ts` uses the module only once a `requests` call answers: on Linux `native.available` is true (the host takes its
+packages' calls) though no module answers the app's.
 
 | op | Request | Reply |
 |---|---|---|
@@ -73,3 +77,18 @@ shows no app the pointer or other windows, so the desktop's own pickers stand in
   (`@DEFAULT_SOURCE@`) come through `pulsesrc`, which PipeWire's Pulse server answers, mixed into AAC.
 - A GIF reads raw RGBA frames from the child's stdout into the shared encoder (`capture/src/gif.rs`) at up to
   15 fps, so its timing matches the Mac's: a still screen is one frame.
+
+### What the Linux build leaves out
+
+The view reads `platform` and hides what Linux has no way to do yet:
+
+- The menu bar item, the floating thumbnail, Pin, the recording HUD, Show in Finder and click highlights: GNOME has no
+  tray without an extension, and these are the Mac's panels. The main window is the UI.
+- Text capture: `@exact/text-detection` has no Linux implementation. The Text button is gone and its shortcut says so.
+- A recording's preview and Copy: the Linux host plays no video and decodes no GIF, and `@exact/clipboard` there copies
+  PNGs and text only. A recording shows a line saying so.
+
+The window's Wayland app id is the app's id, so GNOME matches it to `dev.mchisolm0.glint.desktop`. The build writes
+that file beside the binary; the GlobalShortcuts portal refuses an app id with no desktop entry ("An app id is
+required"), so install it once (README). Under the agent (`EXACT_AGENT=1`, the app's tests) nobody answers the
+desktop's picker, so an empty area is the fixed 400x300 one the Mac's module picks there.

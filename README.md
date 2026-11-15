@@ -21,7 +21,7 @@ microphone optional) or GIF.
 | Piece | File | Platforms |
 |---|---|---|
 | View, editor, library, settings | `app.contract`, `shapes.contract`, `app.ts` | every host |
-| Capture and recording | `capture/` (`glint-capture`), `data/src/lib.rs` | macOS now; Linux next |
+| Capture and recording | `capture/` (`glint-capture`), `data/src/lib.rs` | macOS, Linux |
 | Overlays and floating panels | `modules/apple/*.swift` | macOS |
 
 [docs/design.md](docs/design.md) has the interfaces between them.
@@ -40,3 +40,18 @@ bun exact.mjs test macos
 ```
 
 The first capture asks for Screen Recording permission.
+
+### Linux (GNOME 48 or later, Wayland)
+
+Needs `wl-clipboard`, `xdg-desktop-portal-gnome`, and GStreamer with its PipeWire plugin and `openh264enc` or
+`x264enc`. The window is the UI; docs/design.md, "Linux notes", lists what the Mac has that Linux lacks.
+
+```sh
+bun exact.mjs linux   # prints the binary and its desktop entry
+# Once: GNOME's shortcut portal needs a desktop entry for dev.mchisolm0.glint.
+cp target/host-dev/dev.mchisolm0.glint.desktop ~/.local/share/applications/
+target/host-dev/glint-linux
+```
+
+The first launch asks to add the shortcuts (change them in Settings, Apps, Glint), the first capture to allow
+screenshots, and the first recording which display to share.
