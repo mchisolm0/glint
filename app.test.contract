@@ -78,3 +78,27 @@ test "settings are kept"
   tap "settings-button"
   tap "set-copy"
   expect state copyAfter == false
+
+test "a recording lands in the list as an MP4"
+  tap "record"
+  clock data
+  expect state recordingOn == true
+  expect text "record" == "Stop"
+  clock +1500 real
+  tap "record"
+  clock data
+  expect state recordingOn == false
+  expect state current.kind == "mp4"
+  expect state current.duration >= 1000
+  expect tree has "player"
+
+test "a GIF recording lands in the list"
+  tap "settings-button"
+  type "set-format" "gif"
+  tap "record"
+  clock data
+  clock +1200 real
+  tap "record"
+  clock data
+  expect state current.kind == "gif"
+  expect tree has "preview"

@@ -9,6 +9,8 @@ type Mark = Args<'saveEdit'>[1][number];
 // The staging folders are data/src/lib.rs's STAGING (/private/tmp/glint on macOS, /tmp/glint on Linux).
 export const grants = [
   'device.global-shortcuts',
+  'device.login-item',
+  'device.microphone purpose.microphone',
   'fs.read app:/data/captures',
   'fs.write app:/data/captures',
   'fs.read /private/tmp/glint',

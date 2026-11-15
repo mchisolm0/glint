@@ -5,17 +5,20 @@
     "": {
       "name": "glint",
       "dependencies": {
-        "@exact/clipboard": "file:../exact/packages/clipboard",
-        "@exact/global-shortcuts": "file:../exact/packages/global-shortcuts",
-        "@exact/text-detection": "file:../exact/packages/text-detection",
+        "@exact/clipboard": "file:../exact-glint/packages/clipboard",
+        "@exact/global-shortcuts": "file:../exact-glint/packages/global-shortcuts",
+        "@exact/login-item": "file:../exact-glint/packages/login-item",
+        "@exact/text-detection": "file:../exact-glint/packages/text-detection",
       },
     },
   },
   "packages": {
-    "@exact/clipboard": ["@exact/clipboard@file:../exact/packages/clipboard", {}],
+    "@exact/clipboard": ["@exact/clipboard@file:../exact-glint/packages/clipboard", {}],
 
-    "@exact/global-shortcuts": ["@exact/global-shortcuts@file:../exact/packages/global-shortcuts", {}],
+    "@exact/global-shortcuts": ["@exact/global-shortcuts@file:../exact-glint/packages/global-shortcuts", {}],
 
-    "@exact/text-detection": ["@exact/text-detection@file:../exact/packages/text-detection", {}],
+    "@exact/login-item": ["@exact/login-item@file:../exact-glint/packages/login-item", {}],
+
+    "@exact/text-detection": ["@exact/text-detection@file:../exact-glint/packages/text-detection", {}],
   }
 }

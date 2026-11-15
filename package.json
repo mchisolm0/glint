@@ -6,8 +6,9 @@
     "start": "bun exact.mjs serve dist"
   },
   "dependencies": {
-    "@exact/global-shortcuts": "file:../exact/packages/global-shortcuts",
-    "@exact/clipboard": "file:../exact/packages/clipboard",
-    "@exact/text-detection": "file:../exact/packages/text-detection"
+    "@exact/global-shortcuts": "file:../exact-glint/packages/global-shortcuts",
+    "@exact/clipboard": "file:../exact-glint/packages/clipboard",
+    "@exact/text-detection": "file:../exact-glint/packages/text-detection",
+    "@exact/login-item": "file:../exact-glint/packages/login-item"
   }
 }
