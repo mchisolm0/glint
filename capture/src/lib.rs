@@ -1,7 +1,7 @@
 //! Glint's capture layer: screenshots and screen recordings, written straight to files.
 //!
-//! One API over a back end per platform: ScreenCaptureKit on macOS (`mac.rs`), and later xdg-desktop-portal
-//! plus PipeWire on Linux (`linux.rs`, a stub for now). PNG writing, the mosaic and GIF encoding (`gif.rs`)
+//! One API over a back end per platform: ScreenCaptureKit on macOS (`mac.rs`), and xdg-desktop-portal plus
+//! PipeWire (through GStreamer) on Linux (`linux.rs`). PNG writing, the mosaic and GIF encoding (`gif.rs`)
 //! work on RGBA frames, so every back end shares them.
 //!
 //! Rects are the desktop's global points, origin top-left (CoreGraphics). Pixels are points times the
@@ -9,16 +9,16 @@
 
 use std::path::{Path, PathBuf};
 
-// Linux's stub has no frames to encode yet.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod gif;
 
 #[cfg(target_os = "macos")]
 #[path = "mac.rs"]
 mod platform;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[path = "linux.rs"]
 mod platform;
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("glint-capture has back ends for macOS and Linux only");
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -30,13 +30,14 @@ pub struct Rect {
     pub height: f64,
 }
 
-// The Linux stub has no displays to clip to yet.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl Rect {
+    // Linux cannot see the pointer, so only the Mac picks a display by a point.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn centre(&self) -> (f64, f64) {
         (self.x + self.width / 2.0, self.y + self.height / 2.0)
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn contains(&self, (x, y): (f64, f64)) -> bool {
         x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
     }
@@ -148,7 +149,6 @@ pub fn mosaic_path(png: &Path) -> PathBuf {
 /// Each side of the mosaic is the picture's divided by this, rounded up.
 const MOSAIC_BLOCK: u32 = 16;
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// Writes the mosaic of a straight-alpha RGBA picture beside `png` and returns its path.
 pub(crate) fn write_mosaic(png: &Path, rgba: &[u8], width: u32, height: u32) -> Result<PathBuf> {
     let (small, w, h) = mosaic(rgba, width, height);

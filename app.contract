@@ -48,6 +48,8 @@ shape Viewport
 fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut): string = a.registered and b.registered and c.registered and d.registered ? "Hyper 3 screen · 4 area · 5 record · 2 text" : "A shortcut is taken by another app; use the menu bar item."
 fn clock(ms: number): string = `${floor(ms / 60000)}:${floor(ms / 1000) % 60 < 10 ? "0" : ""}${floor(ms / 1000) % 60}`
 fn sizeLine(c: Capture): string = c.kind == "png" ? `${c.width}×${c.height}` : `${c.kind.toUpperCase()} ${clock(c.duration)} · ${c.width}×${c.height}`
+// A failure worth showing: a picker the person cancelled is not one.
+fn shown(prefix: string, message: string): string = message.endsWith("was cancelled") ? "" : `${prefix}: ${message}`
 fn strokeOf(level: number, unit: number): number = (level == 1 ? 3 : level == 2 ? 6 : 12) * unit
 
 component Glint
@@ -93,7 +95,7 @@ component Glint
   state recH = 0
   derive current = first(captures.filter(c => c.path == selected))
   derive busy = pending(staged) or pending(shot) or pending(area) or pending(recording)
-  derive problem = match failure(staged) { case some(f) => `Capture failed: ${f.message}`, case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(recording) { case some(f) => `Recording failed: ${f.message}`, case none => match failure(saved) { case some(f) => `Saving the edit failed: ${f.message}`, case none => match failure(read) { case some(f) => `Text recognition failed: ${f.message}`, case none => "" } } } } }
+  derive problem = match failure(staged) { case some(f) => shown("Capture failed", f.message), case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(recording) { case some(f) => shown("Recording failed", f.message), case none => match failure(saved) { case some(f) => `Saving the edit failed: ${f.message}`, case none => match failure(read) { case some(f) => `Text recognition failed: ${f.message}`, case none => "" } } } } }
 
   // The editor. Marks and the crop are in the image's pixels.
   state editing = ""

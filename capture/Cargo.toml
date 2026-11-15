@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 workspace = "../.exact/shells"
 
-# One API (src/lib.rs) over a back end per platform: ScreenCaptureKit on macOS (src/mac.rs), and later
+# One API (src/lib.rs) over a back end per platform: ScreenCaptureKit on macOS (src/mac.rs), and
 # xdg-desktop-portal plus PipeWire on Linux (src/linux.rs). PNG and GIF encoding are shared.
 [dependencies]
 png = "0.18"
@@ -16,3 +16,11 @@ gif = "0.14"
 # macos_26_0 for SCScreenshotConfiguration, the only API that captures a window with its shadow. Older
 # macOS still runs: the bridge checks availability at run time and window() falls back.
 screencapturekit = { version = "11.1.2", features = ["macos_26_0"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The Screenshot and ScreenCast portals over zbus, pure Rust, run by pollster on the caller's thread.
+# Recording encodes with a gst-launch-1.0 child, so no GStreamer library is linked.
+ashpd = { version = "0.14", default-features = false, features = ["async-io", "screenshot", "screencast"] }
+pollster = "1"
+# fcntl, to hand the portal's PipeWire fd to that child, and kill, to end it with EOS.
+libc = "0.2"

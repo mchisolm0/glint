@@ -51,3 +51,25 @@ Glint's own windows (overlays, panels, pins, HUD, main window) are excluded from
 | `copy` | `path`, `kind` | `{ok}`; image data for a PNG, a file URL for anything |
 | `reveal`, `open` | `path` | `{ok}`; Finder, or the default app |
 | `requests` (`call`) | none | `{seq, kind, path}`: the latest thing a panel or the HUD asked the app to do (`annotate`, `stopRecording`). The module calls `changed("glint.requests")` after each |
+
+## Linux notes
+
+Capture goes through xdg-desktop-portal (`capture/src/linux.rs`), so it runs on GNOME and KDE under Wayland. Wayland
+shows no app the pointer or other windows, so the desktop's own pickers stand in for Glint's overlay:
+
+| Source | On Linux |
+|---|---|
+| `captureScreen` | The whole desktop, every display, from the Screenshot portal without a picker. The first one asks the person to allow screenshots (GNOME: "Allow Apps to Take Screenshots?"); a refusal is kept and every later call fails until it is changed in Settings, Privacy and Security |
+| `captureArea` | An empty rect opens the desktop's screenshot UI and answers what the person picked there (area, window or screen). A non-empty rect (from a future overlay) takes the desktop and crops to it, in the picture's pixels |
+| `captureWindow` | The same screenshot UI; `id` is unused. The person picks Window in it |
+| `startRecording` | A ScreenCast portal session. The first recording shows the desktop's chooser (a display, or a window when no area is given); its restore token is kept in the staging folder (`/tmp/glint/screencast.token`), so later ones start without it until a reboot clears `/tmp`. An area is cropped from the chosen display. `clicks` is ignored |
+| `stopRecording` | Ends the `gst-launch-1.0` child that encodes the PipeWire stream: EOS for MP4, so mp4mux writes its index |
+
+- A cancelled picker answers an error ending "was cancelled".
+- GNOME's screenshot UI also copies an interactive pick to the clipboard and posts a "Screenshot captured" notice.
+- Glint's own windows are not excluded: the portal has no way to leave an app out.
+- Recording needs GStreamer with its PipeWire plugin and an H.264 encoder (openh264enc or x264enc); MP4 frames are
+  the display's logical size, so a HiDPI display records at 1x. System audio (`@DEFAULT_MONITOR@`) and the microphone
+  (`@DEFAULT_SOURCE@`) come through `pulsesrc`, which PipeWire's Pulse server answers, mixed into AAC.
+- A GIF reads raw RGBA frames from the child's stdout into the shared encoder (`capture/src/gif.rs`) at up to
+  15 fps, so its timing matches the Mac's: a still screen is one frame.

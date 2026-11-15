@@ -132,7 +132,8 @@ const sources: TypeScriptSources = {
   },
   pick: async ([mode], _store, _storage, native) => {
     const swift = mac(native);
-    if (!swift) throw new Error('No area picker on this platform yet.');
+    // Elsewhere (Linux) an empty area hands the choice to the desktop's own picker (docs/design.md, Linux notes).
+    if (!swift) return { picked: true, x: 0, y: 0, width: 0, height: 0, window: 0 };
     return (await swift.later({ op: 'pick', mode })) as Result<'pick'>;
   },
   showQuick: ([path, kind], _store, _storage, native) => nativeReply(native, { op: 'quick', path, kind }),
