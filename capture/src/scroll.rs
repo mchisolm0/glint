@@ -15,19 +15,67 @@ use std::path::Path;
 pub(crate) fn start(path: &Path, width: u32, height: u32) -> Result<(Frames, Encoder)> {
     let path = path.to_owned();
     frames::spawn("glint-scroll", width, height, move |rx| {
-        let mut stitch = Stitch::new(width as usize, height as usize);
+        let mut stitch: Option<(Opaque, Stitch)> = None;
         loop {
             match rx.recv() {
-                Ok(Message::Frame(rgba, _)) => stitch.add(rgba),
+                Ok(Message::Frame(rgba, _)) => {
+                    let (part, stitch) = stitch.get_or_insert_with(|| {
+                        let part = Opaque::of(&rgba, width as usize, height as usize);
+                        (part, Stitch::new(part.width, part.height))
+                    });
+                    stitch.add(part.cut(rgba, width as usize));
+                }
                 Ok(Message::End(_)) => break,
                 Err(_) => return Err("the scrolling capture ended without finishing".into()),
             }
         }
+        let (part, stitch) = stitch.ok_or("the scrolling capture saw no frames")?;
         let (rgba, rows) = stitch.finish().ok_or("the scrolling capture saw no frames")?;
+        let width = part.width as u32;
         write_png(&path, &rgba, width, rows as u32)?;
         write_mosaic(&path, &rgba, width, rows as u32)?;
         Ok(Video { width, height: rows as u32, duration_ms: 0 })
     })
+}
+
+/// The opaque rectangle of the first frame, which every frame is cut to. GNOME casts a window as a
+/// display-sized frame with the window at the top left, its shadow half transparent and the rest clear; cut
+/// to the window, the overlay scroll bar is back at the right edge the row hashes leave out.
+#[derive(Clone, Copy)]
+struct Opaque {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+}
+
+impl Opaque {
+    fn of(rgba: &[u8], width: usize, height: usize) -> Self {
+        let solid = |x: usize, y: usize| rgba[(y * width + x) * 4 + 3] == 255;
+        let rows: Vec<usize> = (0..height).filter(|&y| (0..width).any(|x| solid(x, y))).collect();
+        let cols: Vec<usize> = (0..width).filter(|&x| rows.iter().any(|&y| solid(x, y))).collect();
+        match (rows.first(), rows.last(), cols.first(), cols.last()) {
+            (Some(&top), Some(&bottom), Some(&left), Some(&right)) => {
+                Opaque { x: left, y: top, width: right - left + 1, height: bottom - top + 1 }
+            }
+            _ => Opaque { x: 0, y: 0, width, height },
+        }
+    }
+
+    /// `rgba` (a frame `width` wide) cut to this rectangle.
+    fn cut(&self, rgba: Vec<u8>, width: usize) -> Vec<u8> {
+        if self.x == 0 && self.y == 0 && self.width == width {
+            let mut rgba = rgba;
+            rgba.truncate(self.height * width * 4);
+            return rgba;
+        }
+        let mut out = Vec::with_capacity(self.width * self.height * 4);
+        for y in self.y..self.y + self.height {
+            let start = (y * width + self.x) * 4;
+            out.extend_from_slice(&rgba[start..start + self.width * 4]);
+        }
+        out
+    }
 }
 
 /// The picture stops growing past this many pixels (about 200 MB of RGBA).
@@ -145,6 +193,9 @@ impl Stitch {
             return;
         }
         match offset(last, &cur, top, rows) {
+            // Before the first scroll nothing is placed yet, so a frame that changed some other way (the
+            // window gaining focus as the desktop's picker closes) is the new start.
+            None if self.edges.is_none() => self.last = Some(cur),
             None => {}
             Some(0) => self.last = Some(cur),
             Some(d) => {
@@ -254,6 +305,37 @@ mod tests {
         page[..220 + 84].iter().for_each(|r| want.extend(r));
         want.extend(&view(&page, 0, 100, 10, 6)[94 * W * 4..]);
         assert!(rgba == want, "the stitched page differs from the original");
+    }
+
+    #[test]
+    fn a_window_on_a_clear_frame_is_cut_to_the_window() {
+        // A 3 × 2 opaque window at (1, 1) of a 5 × 4 frame, with a half-clear shadow pixel beside it.
+        let mut rgba = vec![0u8; 5 * 4 * 4];
+        for (x, y) in [(1, 1), (2, 1), (3, 1), (1, 2), (2, 2), (3, 2)] {
+            rgba[(y * 5 + x) * 4..][..4].copy_from_slice(&[x as u8, y as u8, 9, 255]);
+        }
+        rgba[(3 * 5 + 4) * 4 + 3] = 80;
+        let part = Opaque::of(&rgba, 5, 4);
+        assert_eq!((part.x, part.y, part.width, part.height), (1, 1, 3, 2));
+        assert_eq!(part.cut(rgba, 5).chunks(4).map(|p| (p[0], p[1])).collect::<Vec<_>>(), [(1, 1), (2, 1), (3, 1), (1, 2), (2, 2), (3, 2)]);
+    }
+
+    #[test]
+    fn a_first_frame_whose_toolbar_then_changes_is_not_the_start() {
+        let page = page(400);
+        // A ten-row patterned toolbar, drawn differently in the first frame (an unfocused window).
+        let frame = |scroll: usize, toolbar: usize| {
+            let mut out: Vec<u8> = page[toolbar..toolbar + 10].concat();
+            out.extend(view(&page, scroll, 90, 0, 6));
+            out
+        };
+        let mut stitch = Stitch::new(W, 100);
+        for (scroll, toolbar) in [(0, 310), (0, 300), (30, 300), (70, 300)] {
+            stitch.add(frame(scroll, toolbar));
+        }
+        let (rgba, rows) = stitch.finish().unwrap();
+        assert_eq!(rows, 10 + 70 + 84 + 6);
+        assert_eq!(&rgba[..W * 4], &page[300][..]);
     }
 
     #[test]

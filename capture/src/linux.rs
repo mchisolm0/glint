@@ -23,6 +23,8 @@ use std::time::{Duration, Instant};
 const MP4_FPS: u32 = 30;
 /// GIF frames closer together than this are dropped: 15 fps, as on the Mac.
 const GIF_FRAME: Duration = Duration::from_micros(1_000_000 / 15);
+/// A scrolling capture's frames: twice a GIF's, so a quick scroll still overlaps the last frame.
+const SCROLL_FRAME: Duration = Duration::from_micros(1_000_000 / 30);
 const GIF_MAX_WIDTH: f64 = 1280.0;
 /// How long a recording may take to start, and an MP4 to finish writing.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -542,10 +544,11 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
                 _ => gif::start(to, width, height)?,
             };
             let stdout = gst.child.stdout.take().expect("piped");
+            let every = if options.kind == VideoKind::Scroll { SCROLL_FRAME } else { GIF_FRAME };
             let (first_frame, flowing) = mpsc::channel();
             let reader = std::thread::Builder::new()
                 .name("glint-gif-frames".into())
-                .spawn(move || read_frames(stdout, frames, (width * height * 4) as usize, first_frame))
+                .spawn(move || read_frames(stdout, frames, (width * height * 4) as usize, every, first_frame))
                 .map_err(|e| e.to_string())?;
             let mut recording = Recording {
                 gst,
@@ -564,9 +567,9 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
     }
 }
 
-/// Reads fixed-size RGBA frames until the pipe closes, passing on at most one per GIF_FRAME. The first
+/// Reads fixed-size RGBA frames until the pipe closes, passing on at most one per `every`. The first
 /// frame is announced on `first`.
-fn read_frames(mut pipe: impl Read, frames: frames::Frames, size: usize, first: mpsc::Sender<()>) {
+fn read_frames(mut pipe: impl Read, frames: frames::Frames, size: usize, every: Duration, first: mpsc::Sender<()>) {
     let mut last: Option<Instant> = None;
     loop {
         let mut frame = vec![0; size];
@@ -574,7 +577,7 @@ fn read_frames(mut pipe: impl Read, frames: frames::Frames, size: usize, first: 
             return;
         }
         let now = Instant::now();
-        if last.is_some_and(|t| now.duration_since(t) < GIF_FRAME) {
+        if last.is_some_and(|t| now.duration_since(t) < every) {
             continue;
         }
         if last.is_none() {
