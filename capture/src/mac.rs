@@ -68,7 +68,7 @@ fn rect(r: CGRect) -> Rect {
 fn display_at(content: &SCShareableContent, point: (f64, f64)) -> Result<SCDisplay> {
     let displays = content.displays();
     let found = displays.iter().position(|d| rect(d.frame()).contains(point)).unwrap_or(0);
-    displays.into_iter().nth(found).ok_or_else(|| "there is no display".to_string())
+    displays.into_iter().nth(found).ok_or_else(|| "there is no display to capture (is the screen locked or asleep?)".to_string())
 }
 
 /// The display, minus every window of Glint's own process: the overlays, panels and main window.
