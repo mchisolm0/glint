@@ -44,7 +44,8 @@ final class Glint: ExactModule {
                 } else {
                     let number = { (key: String) in CGFloat((request[key] as? NSNumber)?.doubleValue ?? 0) }
                     hud?.close()
-                    hud = RecordingHUD(area: CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height"))) { [weak self] in
+                    let area = CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height"))
+                    hud = RecordingHUD(area: area, scrolling: request["kind"] as? String == "scroll") { [weak self] in
                         self?.post("stopRecording", path: "")
                     }
                 }

@@ -9,7 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+mod frames;
 mod gif;
+mod scroll;
 
 #[cfg(target_os = "macos")]
 #[path = "mac.rs"]
@@ -59,10 +61,13 @@ pub struct Shot {
     pub mosaic: PathBuf,
 }
 
+/// What a recording makes. `Scroll` is a scrolling capture: frames of the area while the person scrolls it,
+/// stitched into one tall PNG (`scroll.rs`), with its mosaic beside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VideoKind {
     Mp4,
     Gif,
+    Scroll,
 }
 
 impl VideoKind {
@@ -70,14 +75,17 @@ impl VideoKind {
         match name {
             "mp4" => Ok(Self::Mp4),
             "gif" => Ok(Self::Gif),
-            other => Err(format!("a recording is \"mp4\" or \"gif\", not {other:?}")),
+            "scroll" => Ok(Self::Scroll),
+            other => Err(format!("a recording is \"mp4\", \"gif\" or \"scroll\", not {other:?}")),
         }
     }
 
-    pub fn name(self) -> &'static str {
+    /// The file's extension, which is also the library's kind.
+    pub fn extension(self) -> &'static str {
         match self {
             Self::Mp4 => "mp4",
             Self::Gif => "gif",
+            Self::Scroll => "png",
         }
     }
 }
@@ -87,15 +95,16 @@ pub struct RecordOptions {
     /// `None` records the whole display under the pointer.
     pub area: Option<Rect>,
     pub kind: VideoKind,
+    /// Ignored by a scrolling capture, which never shows it.
     pub cursor: bool,
     /// Draws a ring at each click (macOS 15 and later).
     pub clicks: bool,
-    /// System audio. MP4 only; a GIF has no sound.
+    /// System audio. MP4 only.
     pub audio: bool,
     pub microphone: bool,
 }
 
-/// A finished recording, in pixels and milliseconds.
+/// A finished recording, in pixels and milliseconds (0 for a scrolling capture).
 #[derive(Debug)]
 pub struct Video {
     pub width: u32,
@@ -135,7 +144,7 @@ pub fn window(id: u32, to: &Path) -> Result<Shot> {
     platform::window(id, to)
 }
 
-/// Starts recording into `to` (an `.mp4` or `.gif` path) and returns once frames are flowing.
+/// Starts recording into `to` (a path with the kind's extension) and returns once frames are flowing.
 pub fn record(options: &RecordOptions, to: &Path) -> Result<Recording> {
     Ok(Recording { inner: platform::record(options, to)?, kind: options.kind })
 }
@@ -186,7 +195,7 @@ fn mosaic(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
 }
 
 /// Writes a straight-alpha RGBA picture as a PNG.
-fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<()> {
+pub(crate) fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<()> {
     let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);

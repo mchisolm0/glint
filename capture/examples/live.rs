@@ -1,5 +1,5 @@
 //! Drives one capture against the running desktop, for checking a back end by hand:
-//! `cargo run --example live -- <screen|area|pick|window|mp4|gif> <dir> [seconds]`.
+//! `cargo run --example live -- <screen|area|pick|window|mp4|gif|scroll> <dir> [seconds] [x y width height]`.
 //! `area` takes a fixed 300 × 200 rect at (40, 60); `pick` passes an empty one, so the portal asks.
 //! It prints what it wrote; delete the files once checked, since they show the screen.
 
@@ -28,8 +28,17 @@ fn main() -> Result<(), String> {
             let kind = VideoKind::parse(&what[..3])?;
             let area = (what == "mp4-area").then_some(Rect { x: 100.0, y: 50.0, width: 641.0, height: 401.0 });
             let options = RecordOptions { area, kind, cursor: true, clicks: false, audio: false, microphone: false };
-            let recording = glint_capture::record(&options, &dir.join(format!("rec.{}", kind.name())))?;
+            let recording = glint_capture::record(&options, &dir.join(format!("rec.{}", kind.extension())))?;
             println!("recording");
+            std::thread::sleep(std::time::Duration::from_secs(seconds));
+            println!("{:?}", recording.stop()?);
+        }
+        "scroll" => {
+            let n = |i: usize| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let area = Some(Rect { x: n(4), y: n(5), width: n(6), height: n(7) });
+            let options = RecordOptions { area, kind: VideoKind::Scroll, cursor: false, clicks: false, audio: false, microphone: false };
+            let recording = glint_capture::record(&options, &shot("scroll"))?;
+            println!("scroll now");
             std::thread::sleep(std::time::Duration::from_secs(seconds));
             println!("{:?}", recording.stop()?);
         }

@@ -1,57 +1,14 @@
-//! GIF encoding from RGBA frames on a background thread, shared by every back end. Each frame lasts until
-//! the next one arrives, so a still screen (which sends no new frames) costs one frame, not many.
+//! GIF encoding from RGBA frames, shared by every back end. Each frame lasts until the next one arrives, so a
+//! still screen (which sends no new frames) costs one frame, not many.
 
+use crate::frames::{self, Encoder, Frames, Message};
 use crate::{Result, Video};
 use std::path::Path;
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use std::thread::JoinHandle;
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
-
-/// Frames waiting for the encoder. Past this the capture drops frames rather than queue megabytes; the
-/// next frame's delay covers the gap.
-const BACKLOG: usize = 8;
 
 /// NeuQuant's speed, 1 (best) to 30 (fastest). 10 is the gif crate's suggested balance.
 const SPEED: i32 = 10;
-
-enum Message {
-    Frame(Vec<u8>, Instant),
-    End(Instant),
-}
-
-/// Where a capture callback sends frames. Cheap to clone into a callback.
-#[derive(Clone)]
-pub(crate) struct Frames {
-    tx: SyncSender<Message>,
-    width: u32,
-    height: u32,
-}
-
-impl Frames {
-    /// Queues one straight-alpha RGBA frame taken at `at`, or drops it if the encoder is behind or the
-    /// frame has the wrong size.
-    pub(crate) fn push(&self, rgba: Vec<u8>, at: Instant) {
-        if rgba.len() != (self.width * self.height * 4) as usize {
-            return;
-        }
-        let _ = self.tx.try_send(Message::Frame(rgba, at));
-    }
-}
-
-/// The encoder thread; `finish` closes the file.
-pub(crate) struct Encoder {
-    tx: SyncSender<Message>,
-    thread: JoinHandle<Result<Video>>,
-}
-
-impl Encoder {
-    /// The last frame lasts until `end`. Answers the GIF's size and duration.
-    pub(crate) fn finish(self, end: Instant) -> Result<Video> {
-        // `send` blocks until there is room, so the end is never dropped.
-        let _ = self.tx.send(Message::End(end));
-        self.thread.join().map_err(|_| "the GIF encoder panicked".to_string())?
-    }
-}
 
 /// Creates the GIF at `path` and starts its encoder thread.
 pub(crate) fn start(path: &Path, width: u32, height: u32) -> Result<(Frames, Encoder)> {
@@ -60,12 +17,7 @@ pub(crate) fn start(path: &Path, width: u32, height: u32) -> Result<(Frames, Enc
     let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut gif = gif::Encoder::new(std::io::BufWriter::new(file), w, h, &[]).map_err(|e| e.to_string())?;
     gif.set_repeat(gif::Repeat::Infinite).map_err(|e| e.to_string())?;
-    let (tx, rx) = sync_channel(BACKLOG);
-    let thread = std::thread::Builder::new()
-        .name("glint-gif".into())
-        .spawn(move || encode(gif, rx, width, height))
-        .map_err(|e| e.to_string())?;
-    Ok((Frames { tx: tx.clone(), width, height }, Encoder { tx, thread }))
+    frames::spawn("glint-gif", width, height, move |rx| encode(gif, rx, width, height))
 }
 
 type Gif = gif::Encoder<std::io::BufWriter<std::fs::File>>;

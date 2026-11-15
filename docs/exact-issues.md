@@ -93,7 +93,7 @@ presentation.
 
 ## 5. Field report: what a screenshot tool needed beyond the box
 
-Glint: Hyper+3 screen, +4 area or window, +5 record, +2 text (OCR); a quick-access thumbnail, pins, an annotation
+Glint: Hyper+3 screen, +4 area or window, +5 record, +6 scrolling capture, +2 text (OCR); a quick-access thumbnail, pins, an annotation
 editor (arrow, box, ellipse, line, pen, highlighter, text, pixelate, steps, spotlight, crop, background), MP4 and
 GIF recording. One Contract file, ~300 lines of `app.ts`, a Rust capture crate, a Swift module for the Mac's windows.
 
@@ -107,6 +107,8 @@ GIF recording. One Contract file, ~300 lines of `app.ts`, a Rust capture crate, 
   recording frame. All Swift. A host-drawn overlay or panel primitive would let the next capture app skip it.
 - **Types:** shapes aren't exported by name from `app.contract.d.ts`; Glint derives `Mark` from `Args<'saveEdit'>`.
 - **`exactViewport().devicePixelRatio`** must be declared `option<number>`, or the bake refuses the shape.
+- **`test macos`** drives a 420 × 900 viewport, not app.json's window size, so a desktop layout's drags leave the
+  viewport until `--size 1100x760` is passed. A test file can't say its own size.
 - **`exact lock`** hit the same bitflags conflict twice after dependency changes; deleting `Cargo.lock` and locking
   again fixed it both times.
 

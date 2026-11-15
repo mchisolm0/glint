@@ -34,8 +34,12 @@ points × the display's scale.
 | `captureScreen` | none | `Staged` of the display under the pointer |
 | `captureArea` | `x, y, width, height` | `Staged`, clipped to the display holding the area's centre |
 | `captureWindow` | `id` (CGWindowID) | `Staged`, the window alone with its shadow on transparency |
-| `startRecording` | `x, y, width, height, kind, cursor, clicks, audio, microphone` | `Recording`. `width == 0` records the display under the pointer. `kind` is `"mp4"` or `"gif"` |
-| `stopRecording` | none | `Staged` of the finished file |
+| `startRecording` | `x, y, width, height, kind, cursor, clicks, audio, microphone` | `Recording`. `width == 0` records the display under the pointer. `kind` is `"mp4"`, `"gif"` or `"scroll"` |
+| `stopRecording` | none | `Staged` of the finished file; a `"scroll"` one is a PNG with its mosaic |
+
+A scrolling capture is a recording whose frames go to a stitcher (`capture/src/scroll.rs`) instead of the GIF
+encoder: each frame is matched to the last by row hashes, rows fixed at the top and bottom (a toolbar, a sticky
+header) are kept once, and the band between them grows the picture as the person scrolls.
 | `platform` | none | `{os}`: Rust's `std::env::consts::OS` (`"macos"`, `"linux"`), which hides what a platform lacks |
 
 Glint's own windows (overlays, panels, pins, HUD, main window) are excluded from every capture.
@@ -51,7 +55,7 @@ packages' calls) though no module answers the app's.
 | `adopt` | `from` (native path), `to` (`app:/data/...`) | `{path}`; moves the file and calls `wrote` |
 | `quick` | `path` (`app:/`), `kind` | `{ok}`; shows the quick-access panel |
 | `pin` | `path` | `{ok}`; a floating, always-on-top image |
-| `hud` | `x, y, width, height` or `hide: true` | `{ok}`; the recording frame and its Stop button |
+| `hud` | `x, y, width, height, kind` or `hide: true` | `{ok}`; the recording frame and its Stop button, or Done when `kind` is `"scroll"` |
 | `copy` | `path`, `kind` | `{ok}`; image data for a PNG, a file URL for anything |
 | `reveal`, `open` | `path` | `{ok}`; Finder, or the default app |
 | `requests` (`call`) | none | `{seq, kind, path}`: the latest thing a panel or the HUD asked the app to do (`annotate`, `stopRecording`). The module calls `changed("glint.requests")` after each |
@@ -67,6 +71,7 @@ shows no app the pointer or other windows, so the desktop's own pickers stand in
 | `captureArea` | An empty rect opens the desktop's screenshot UI and answers what the person picked there (area, window or screen). A non-empty rect (from a future overlay) takes the desktop and crops to it, in the picture's pixels |
 | `captureWindow` | The same screenshot UI; `id` is unused. The person picks Window in it |
 | `startRecording` | A ScreenCast portal session. The first recording shows the desktop's chooser (a display, or a window when no area is given); its restore token is kept in the staging folder (`/tmp/glint/screencast.token`), so later ones start without it until a reboot clears `/tmp`. An area is cropped from the chosen display. `clicks` is ignored |
+| `startRecording` `"scroll"` | Always shows the chooser (no restore token), since each one is likely a different window; pick the window to scroll |
 | `stopRecording` | Ends the `gst-launch-1.0` child that encodes the PipeWire stream: EOS for MP4, so mp4mux writes its index |
 
 - A cancelled picker answers an error ending "was cancelled".

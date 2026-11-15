@@ -124,15 +124,16 @@ mod native {
                     microphone: args.flag(8),
                 };
                 let started = now();
-                let path = staged(started, options.kind.name())?;
+                let path = staged(started, options.kind.extension())?;
                 let recording = glint_capture::record(&options, &path)?;
-                let kind = recording.kind().name().into();
+                let kind = recording.kind().extension().into();
                 *live = Some(Live { recording, path, started });
                 Ok(Recording { recording: true, started, kind }.to_value())
             }
             _ => {
                 let Live { recording, path, started } = live.take().ok_or("no recording is running")?;
-                let kind = recording.kind().name().into();
+                let scroll = recording.kind() == VideoKind::Scroll;
+                let kind = recording.kind().extension().into();
                 let video = recording.stop()?;
                 let staged = Staged {
                     path: text(&path),
@@ -141,7 +142,7 @@ mod native {
                     height: f64::from(video.height),
                     kind,
                     duration: video.duration_ms as f64,
-                    mosaic: String::new(),
+                    mosaic: if scroll { text(&glint_capture::mosaic_path(&path)) } else { String::new() },
                 };
                 Ok(staged.to_value())
             }

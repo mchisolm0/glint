@@ -9,11 +9,13 @@ on the Mac and the desktop portal on Linux.
 | 3 | Capture the screen under the pointer |
 | 4 | Drag out an area; Space switches to picking a window; Escape cancels |
 | 5 | Record an area or a display (a click picks the display); again to stop |
+| 6 | Scrolling capture: pick an area, scroll it, then Done (or Hyper+6 again) |
 | 2 | Capture text (OCR) to the clipboard |
 
-After a capture: it is copied, and a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out). The
-editor has arrow, box, ellipse, line, pen, highlighter, text, pixelate, numbered steps, spotlight, crop and a
-background; it saves at the picture's own pixels and stays editable. Recordings are MP4 (system audio and the
+After a capture: it is copied, and a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out). Every
+screenshot opens in the editor, no mode to enter: A arrow, R box, O ellipse, L line, P pen, H highlighter, T text,
+B pixelate, N numbered steps, S spotlight, C crop, and a background. It saves at the picture's own pixels and stays
+editable; Copy saves unsaved marks first, and so does moving to another capture. Recordings are MP4 (system audio and the
 microphone optional) or GIF.
 
 ## Where things live
@@ -36,7 +38,7 @@ Bun 1.4.2, and Xcode's `clang` and `swift` first on `PATH`.
 export EXACT=../exact-glint
 bun $EXACT/scripts/exact.mjs setup   # once
 bun exact.mjs mac --run
-bun exact.mjs test macos
+bun exact.mjs test macos --size 1100x760   # the editor needs a window's width, not the default phone size
 ```
 
 The first capture asks for Screen Recording permission.

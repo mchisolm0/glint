@@ -1,12 +1,12 @@
 test "a new install has no captures and names its shortcuts"
   clock data
   expect text "empty" == "No captures yet."
-  expect text "status-line" == "Hyper 3 screen · 4 area · 5 record · 2 text"
+  expect text "status-line" == "Hyper 3 screen · 4 area · 5 record · 6 scroll · 2 text"
 
-test "a capture lands in the list, selected and copied"
+test "a capture lands in the list, open in the editor and copied"
   tap "screen"
   clock data
-  expect tree has "preview"
+  expect tree has "ink"
   expect tree missing "empty"
   expect text "status-line" == "Copied"
 
@@ -19,22 +19,38 @@ test "an area capture is the picked area at the display's scale"
 test "an arrow drawn and saved becomes the capture's annotated render"
   tap "screen"
   clock data
-  tap "annotate"
   tap "ink" drag 120 60
   expect enabled "undo"
   expect state marks.length == 1
   tap "save"
   clock data
-  expect tree missing "editor"
   expect state current.edited == true
-  tap "annotate"
-  clock data
+  expect state dirty == false
   expect state marks.length == 1
+
+test "single keys pick tools"
+  tap "screen"
+  clock data
+  type "tool-arrow" key "r"
+  expect state tool == "rect"
+  type "tool-arrow" key "t"
+  expect state tool == "text"
+  type "tool-arrow" key "a"
+  expect state tool == "arrow"
+
+test "a new capture saves the marks left on the last one"
+  tap "screen"
+  clock data
+  tap "ink" drag 120 60
+  tap "screen"
+  clock data
+  expect state captures.length == 2
+  expect state captures.1.edited == true
+  expect state marks.length == 0
 
 test "undo takes the last mark back and redo restores it"
   tap "screen"
   clock data
-  tap "annotate"
   tap "tool-rect"
   tap "ink" drag 80 40
   tap "tool-ellipse"
@@ -48,7 +64,6 @@ test "undo takes the last mark back and redo restores it"
 test "text typed on the picture is a mark"
   tap "screen"
   clock data
-  tap "annotate"
   tap "tool-text"
   tap "ink"
   type "text-entry" "Look here"
@@ -59,19 +74,19 @@ test "text typed on the picture is a mark"
 test "steps number themselves"
   tap "screen"
   clock data
-  tap "annotate"
   tap "tool-step"
   tap "ink"
   tap "ink" drag 50 0
   expect state marks.1.n == 2
 
-test "cancel leaves the capture as it was"
+test "revert drops unsaved marks"
   tap "screen"
   clock data
-  tap "annotate"
   tap "ink" drag 120 60
-  tap "cancel"
-  expect tree missing "editor"
+  tap "revert"
+  clock data
+  expect state marks.length == 0
+  expect state dirty == false
   expect state current.edited == false
 
 test "settings are kept"
@@ -102,3 +117,16 @@ test "a GIF recording lands in the list"
   clock data
   expect state current.kind == "gif"
   expect tree has "preview"
+
+test "a scrolling capture lands as one PNG in the editor"
+  tap "scroll"
+  clock data
+  expect state recordingOn == true
+  expect text "scroll" == "Done"
+  clock +800 real
+  tap "scroll"
+  clock data
+  expect state recordingOn == false
+  expect state current.kind == "png"
+  expect state current.width >= 400
+  expect tree has "ink"

@@ -1,5 +1,6 @@
 // While recording: a thin click-through frame around the recorded area and a small control beside it with a
-// pulsing red dot, the elapsed time and Stop. Neither window can be shared, and Rust excludes Glint's pid too.
+// pulsing red dot, the elapsed time and Stop. A scrolling capture says "Scroll" and has Done instead; the frame
+// lets the scrolling through to the app under it. Neither window can be shared, and Rust excludes Glint's pid too.
 import AppKit
 
 final class RecordingHUD {
@@ -9,7 +10,7 @@ final class RecordingHUD {
     private var timer: Timer?
 
     /// `area` is in global top-left points; an empty one means the whole display under the pointer, unframed.
-    init(area: CGRect, stop: @escaping () -> Void) {
+    init(area: CGRect, scrolling: Bool = false, stop: @escaping () -> Void) {
         let screen = Desktop.pointerScreen
         let local = area.width > 0 && area.height > 0 ? Desktop.flip(area) : screen.frame
         let display = NSScreen.screens.first { $0.frame.contains(CGPoint(x: local.midX, y: local.midY)) } ?? screen
@@ -47,13 +48,15 @@ final class RecordingHUD {
         dot.layer?.add(pulse, forKey: "pulse")
         root.addSubview(dot)
 
+        if scrolling { time.stringValue = "Scroll" }
         time.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         time.textColor = .white
         time.frame = CGRect(x: 32, y: (size.height - 17) / 2, width: 52, height: 17)
         root.addSubview(time)
 
         var button: ChromeButton!
-        button = ChromeButton(symbol: "stop.fill", title: "Stop", help: "Stop recording", style: .pill, size: 26) {
+        button = ChromeButton(symbol: scrolling ? "checkmark" : "stop.fill", title: scrolling ? "Done" : "Stop",
+                              help: scrolling ? "Finish the scrolling capture" : "Stop recording", style: .pill, size: 26) {
             button.isEnabled = false
             stop()
         }
@@ -62,6 +65,7 @@ final class RecordingHUD {
         control.contentView = root
         control.present(control.frame, from: CGVector(dx: 0, dy: -8), duration: 0.2)
 
+        guard !scrolling else { return }
         let started = Date()
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak time] _ in
             time?.stringValue = Chrome.clock(Date().timeIntervalSince(started))

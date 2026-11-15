@@ -1,14 +1,14 @@
 //! The Linux back end: xdg-desktop-portal through ashpd, so it works on any Wayland desktop with a portal
 //! (GNOME, KDE). Screenshots come from the Screenshot portal. A recording is a ScreenCast portal session
 //! whose PipeWire stream a `gst-launch-1.0` child encodes: to MP4 itself, or to raw RGBA frames on a pipe
-//! for the shared GIF encoder.
+//! for the shared GIF encoder or scrolling stitcher.
 //!
 //! Wayland lets no app read the pointer or other windows, so the portal's own picker stands in for Glint's
 //! overlay: `area` with an empty rect and `window` show it, and a recording's first start shows the desktop's
 //! chooser (a restore token beside the recording skips it after that). Rects are the portal picture's
 //! pixels, origin top-left: at scale 1 that is the desktop's points.
 
-use crate::{gif, RecordOptions, Rect, Result, Shot, Video, VideoKind};
+use crate::{frames, gif, scroll, RecordOptions, Rect, Result, Shot, Video, VideoKind};
 use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
 use ashpd::desktop::screenshot::Screenshot;
 use ashpd::desktop::{PersistMode, Session};
@@ -168,8 +168,11 @@ struct Cast {
 /// Asks the ScreenCast portal for one monitor (or, without an area, a monitor or a window), with the
 /// cursor drawn in when `cursor`. A token from the last recording restores its pick without the chooser;
 /// the new one is kept for the next.
-fn cast(cursor: bool, monitor_only: bool, token: &Path) -> Result<Cast> {
-    let restore = std::fs::read_to_string(token).ok().map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+fn cast(cursor: bool, monitor_only: bool, token: Option<&Path>) -> Result<Cast> {
+    let restore = token
+        .and_then(|t| std::fs::read_to_string(t).ok())
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty());
     let started = pollster::block_on(async {
         let proxy = Screencast::new().await?;
         let modes = proxy.available_cursor_modes().await?;
@@ -186,7 +189,7 @@ fn cast(cursor: bool, monitor_only: bool, token: &Path) -> Result<Cast> {
             .set_cursor_mode(cursor_mode)
             .set_sources(sources)
             .set_multiple(false)
-            .set_persist_mode(PersistMode::ExplicitlyRevoked)
+            .set_persist_mode(if token.is_some() { PersistMode::ExplicitlyRevoked } else { PersistMode::DoNot })
             .set_restore_token(restore.as_deref());
         proxy.select_sources(&session, options).await?.response()?;
         let streams = proxy.start(&session, None, Default::default()).await?.response()?;
@@ -194,7 +197,7 @@ fn cast(cursor: bool, monitor_only: bool, token: &Path) -> Result<Cast> {
         Ok::<_, ashpd::Error>((session, streams, remote))
     });
     let (session, streams, remote) = started.map_err(|e| refusal(e, "the recording", true))?;
-    if let Some(next) = streams.restore_token() {
+    if let (Some(next), Some(token)) = (streams.restore_token(), token) {
         let _ = std::fs::write(token, next);
     }
     let Some((stream, (w, h))) = streams.streams().first().and_then(|s| Some((s, s.size()?))) else {
@@ -415,7 +418,7 @@ impl Drop for Gst {
 
 enum Sink {
     Mp4 { path: PathBuf },
-    Gif { encoder: Option<gif::Encoder>, reader: Option<JoinHandle<()>> },
+    Frames { encoder: Option<frames::Encoder>, reader: Option<JoinHandle<()>> },
 }
 
 pub(crate) struct Recording {
@@ -441,14 +444,14 @@ impl Recording {
                 }
                 Ok(Video { width, height, duration_ms: end.duration_since(self.started).as_millis() as u64 })
             }
-            Sink::Gif { encoder, reader } => {
+            Sink::Frames { encoder, reader } => {
                 // Nothing to finish on GStreamer's side: the frames are ours.
                 let _ = self.gst.child.kill();
                 let _ = self.gst.child.wait();
                 if let Some(reader) = reader.take() {
                     let _ = reader.join();
                 }
-                encoder.take().ok_or("the GIF already finished")?.finish(end)
+                encoder.take().ok_or("the recording already finished")?.finish(end)
             }
         }
     }
@@ -479,13 +482,15 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
             first(&["openh264enc", "x264enc"], "H.264 encoder")?,
             if audio.is_empty() { "" } else { first(&["fdkaacenc", "avenc_aac", "voaacenc"], "AAC encoder")? },
         ),
-        VideoKind::Gif => ("", ""),
+        VideoKind::Gif | VideoKind::Scroll => ("", ""),
     };
     if !has("pipewiresrc") {
         return Err("GStreamer has no PipeWire source (pipewiresrc): install its PipeWire plugin".into());
     }
     let token = to.with_file_name(TOKEN);
-    let cast = cast(options.cursor, options.area.is_some(), &token)?;
+    // A scrolling capture asks every time, since each one is likely a different window.
+    let scroll = options.kind == VideoKind::Scroll;
+    let cast = cast(options.cursor && !scroll, options.area.is_some(), (!scroll).then_some(token.as_path()))?;
     let even = options.kind == VideoKind::Mp4;
     let crop = region(cast.size, cast.position, options.area, even).ok_or("the area is off the recorded screen")?;
     let source = vec![
@@ -526,12 +531,16 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
             recording.started = Instant::now();
             Ok(recording)
         }
-        VideoKind::Gif => {
-            let (width, height) = gif_size(&crop);
+        VideoKind::Gif | VideoKind::Scroll => {
+            // A scrolling capture keeps every pixel.
+            let (width, height) = if options.kind == VideoKind::Gif { gif_size(&crop) } else { (crop.width, crop.height) };
             let output = Output::Raw { width, height };
             let mut gst = Gst::spawn(&pipeline(&source, cast.size, &crop, &output)?, &cast.remote, Stdio::piped())?;
             drop(cast.remote);
-            let (frames, encoder) = gif::start(to, width, height)?;
+            let (frames, encoder) = match options.kind {
+                VideoKind::Scroll => scroll::start(to, width, height)?,
+                _ => gif::start(to, width, height)?,
+            };
             let stdout = gst.child.stdout.take().expect("piped");
             let (first_frame, flowing) = mpsc::channel();
             let reader = std::thread::Builder::new()
@@ -540,7 +549,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
                 .map_err(|e| e.to_string())?;
             let mut recording = Recording {
                 gst,
-                sink: Sink::Gif { encoder: Some(encoder), reader: Some(reader) },
+                sink: Sink::Frames { encoder: Some(encoder), reader: Some(reader) },
                 session: cast.session,
                 width,
                 height,
@@ -557,7 +566,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
 
 /// Reads fixed-size RGBA frames until the pipe closes, passing on at most one per GIF_FRAME. The first
 /// frame is announced on `first`.
-fn read_frames(mut pipe: impl Read, frames: gif::Frames, size: usize, first: mpsc::Sender<()>) {
+fn read_frames(mut pipe: impl Read, frames: frames::Frames, size: usize, first: mpsc::Sender<()>) {
     let mut last: Option<Instant> = None;
     loop {
         let mut frame = vec![0; size];

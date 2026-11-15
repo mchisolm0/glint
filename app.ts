@@ -152,7 +152,7 @@ const sources: TypeScriptSources = {
     return (await swift.later({ op: 'pick', mode })) as Result<'pick'>;
   },
   showQuick: ([path, kind], _store, _storage, native) => nativeReply(native, { op: 'quick', path, kind }),
-  showHud: ([x, y, width, height], _store, _storage, native) => nativeReply(native, { op: 'hud', x, y, width, height }),
+  showHud: ([x, y, width, height, kind], _store, _storage, native) => nativeReply(native, { op: 'hud', x, y, width, height, kind }),
   hideHud: (_args, _store, _storage, native) => nativeReply(native, { op: 'hud', hide: true }),
   pinCapture: ([path], _store, _storage, native) => nativeReply(native, { op: 'pin', path }),
   revealCapture: ([path], _store, _storage, native) => nativeReply(native, { op: 'reveal', path }),

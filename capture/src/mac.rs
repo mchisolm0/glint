@@ -1,8 +1,8 @@
 //! The macOS back end: ScreenCaptureKit through the `screencapturekit` crate. Screenshots use
 //! SCScreenshotManager; recordings use SCStream, with SCRecordingOutput writing MP4 and frame callbacks
-//! feeding the shared GIF encoder. Every display filter excludes Glint's own app by pid.
+//! feeding the shared GIF encoder or scrolling stitcher. Every display filter excludes Glint's own app by pid.
 
-use crate::{gif, RecordOptions, Rect, Result, Shot, Video, VideoKind};
+use crate::{frames, gif, scroll, RecordOptions, Rect, Result, Shot, Video, VideoKind};
 use screencapturekit::cg::CGRect;
 use screencapturekit::cm::SCFrameStatus;
 use screencapturekit::cv::CVPixelBufferLockFlags;
@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 const MP4_FPS: u32 = 60;
 const GIF_FPS: u32 = 15;
+/// A scroll moving more than ~85% of the area between two frames loses rows, so more frames than a GIF's.
+const SCROLL_FPS: u32 = 30;
 const GIF_MAX_WIDTH: f64 = 1280.0;
 /// How long a recording may take to start, and an MP4 to finish writing.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -191,7 +193,7 @@ enum Event {
 
 enum Sink {
     Mp4 { output: SCRecordingOutput, events: Receiver<Event>, started: Instant },
-    Gif(gif::Encoder),
+    Frames(frames::Encoder),
 }
 
 pub(crate) struct Recording {
@@ -207,7 +209,7 @@ impl Recording {
         let stopped = self.stream.stop_capture().map_err(|e| e.to_string());
         let (width, height) = (self.width, self.height);
         match self.sink {
-            Sink::Gif(encoder) => {
+            Sink::Frames(encoder) => {
                 stopped?;
                 encoder.finish(end)
             }
@@ -250,7 +252,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
         None => frame,
     };
     let filter = display_filter(&content, &display)?;
-    let mut config = SCStreamConfiguration::new().with_shows_cursor(options.cursor);
+    let mut config = SCStreamConfiguration::new().with_shows_cursor(options.cursor && options.kind != VideoKind::Scroll);
     // Click rings arrived in macOS 15; on 14 a GIF records without them rather than failing.
     let _ = config.set_shows_mouse_clicks(options.clicks);
     if options.area.is_some() {
@@ -258,7 +260,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
     }
     match options.kind {
         VideoKind::Mp4 => start_mp4(&filter, config, &region, options, to),
-        VideoKind::Gif => start_gif(&filter, config, &region, to),
+        VideoKind::Gif | VideoKind::Scroll => start_frames(&filter, config, &region, options.kind, to),
     }
 }
 
@@ -307,12 +309,26 @@ fn start_mp4(
     Ok(Recording { stream, sink, width, height })
 }
 
-fn start_gif(filter: &SCContentFilter, config: SCStreamConfiguration, region: &Rect, to: &Path) -> Result<Recording> {
-    // One pixel per point keeps a GIF small; past the cap it shrinks to fit.
-    let fit = (GIF_MAX_WIDTH / region.width).min(1.0);
+/// A GIF, or a scrolling capture, from the stream's frames.
+fn start_frames(
+    filter: &SCContentFilter,
+    config: SCStreamConfiguration,
+    region: &Rect,
+    kind: VideoKind,
+    to: &Path,
+) -> Result<Recording> {
+    // One pixel per point keeps a GIF small; past the cap it shrinks to fit. A scrolling capture keeps every pixel.
+    let fit = match kind {
+        VideoKind::Gif => (GIF_MAX_WIDTH / region.width).min(1.0),
+        _ => scale(filter)?,
+    };
     let (width, height) = (pixels(region.width, fit), pixels(region.height, fit));
-    let config = config.with_width(width).with_height(height).with_fps(GIF_FPS).with_pixel_format(PixelFormat::BGRA);
-    let (frames, encoder) = gif::start(to, width, height)?;
+    let fps = if kind == VideoKind::Scroll { SCROLL_FPS } else { GIF_FPS };
+    let config = config.with_width(width).with_height(height).with_fps(fps).with_pixel_format(PixelFormat::BGRA);
+    let (frames, encoder) = match kind {
+        VideoKind::Scroll => scroll::start(to, width, height)?,
+        _ => gif::start(to, width, height)?,
+    };
     let mut stream = SCStream::new(filter, &config).map_err(|e| e.to_string())?;
     stream
         .add_output_handler(
@@ -327,7 +343,7 @@ fn start_gif(filter: &SCContentFilter, config: SCStreamConfiguration, region: &R
         )
         .map_err(|e| e.to_string())?;
     stream.start_capture().map_err(|e| e.to_string())?;
-    Ok(Recording { stream, sink: Sink::Gif(encoder), width, height })
+    Ok(Recording { stream, sink: Sink::Frames(encoder), width, height })
 }
 
 /// A BGRA frame as opaque RGBA, or `None` for a frame with nothing new (ScreenCaptureKit sends those
