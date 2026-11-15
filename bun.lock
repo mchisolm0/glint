@@ -7,6 +7,7 @@
       "dependencies": {
         "@exact/clipboard": "file:../exact/packages/clipboard",
         "@exact/global-shortcuts": "file:../exact/packages/global-shortcuts",
+        "@exact/text-detection": "file:../exact/packages/text-detection",
       },
     },
   },
@@ -14,5 +15,7 @@
     "@exact/clipboard": ["@exact/clipboard@file:../exact/packages/clipboard", {}],
 
     "@exact/global-shortcuts": ["@exact/global-shortcuts@file:../exact/packages/global-shortcuts", {}],
+
+    "@exact/text-detection": ["@exact/text-detection@file:../exact/packages/text-detection", {}],
   }
 }

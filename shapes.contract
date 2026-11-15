@@ -1,0 +1,42 @@
+// The shapes Glint's view, editor and data module share.
+
+// One file in the library. `shown` is the annotated render when there is one, else the original.
+shape Capture
+  path: string
+  name: string
+  stem: string
+  kind: string
+  taken: number
+  width: number
+  height: number
+  duration: number
+  shown: string
+  mosaic: string
+  edited: bool
+
+// One annotation. Points are the image's pixels. `points` is a pen stroke, "x,y x,y …".
+shape Mark
+  kind: string
+  color: string
+  size: number
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  points: string
+  text: string
+  n: number
+
+// What `openEdit` answers: the marks a capture was last saved with.
+shape Edit
+  path: string
+  marks: Mark[]
+  background: bool
+  cx: number
+  cy: number
+  cw: number
+  ch: number
+
+shape Reply
+  ok: bool
+  error: string

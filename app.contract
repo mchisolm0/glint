@@ -1,127 +1,567 @@
-// Glint: screenshots from a global shortcut or the menu bar item.
-// data/src/lib.rs takes the pictures with xcap; app.ts lists, copies and deletes them;
-// modules/apple/AreaPicker.swift draws the area overlay on the Mac.
+// Glint: screenshots, recordings and annotations from global shortcuts or the menu bar item.
+// data/src/lib.rs takes pictures and recordings (glint-capture: ScreenCaptureKit on the Mac, the desktop portal on Linux);
+// app.ts keeps, lists, copies and saves them, and draws the editor's canvas;
+// modules/apple/*.swift draws the Mac's overlays and floating panels (docs/design.md).
 use globalShortcut, globalshortcut, GlobalShortcut from "@exact/global-shortcuts"
+use detectText, DetectedTextList from "@exact/text-detection"
+use Capture, Mark, Edit, Reply from "./shapes.contract"
 
-// A picture Rust just took, waiting in the staging folder for app.ts to keep it.
+// A picture or recording Rust just finished, waiting in the staging folder for app.ts to keep it.
+// `mosaic` is a 1/16-size copy the editor's pixelate tool scales up ("" for video).
 shape Staged
   path: string
   taken: number
   width: number
   height: number
+  kind: string
+  duration: number
+  mosaic: string
 
-shape Capture
-  path: string
-  name: string
-  taken: number
-  width: number
-  height: number
+// What `startRecording` answers: the recording runs until `stopRecording`.
+shape Recording
+  recording: bool
+  started: number
+  kind: string
 
-// A rectangle in the desktop's global points, origin top-left. `picked` is false when Escape cancelled.
+// A rectangle in the desktop's global points, origin top-left. `picked` is false when Escape cancelled;
+// `window` is the CGWindowID of a picked window, else 0.
 shape Area
   picked: bool
   x: number
   y: number
   width: number
   height: number
+  window: number
 
-shape Reply
-  ok: bool
-  error: string
+// The latest thing a floating panel asked the app to do (`annotate`, `stopRecording`); seq 0 is none yet.
+shape Request
+  seq: number
+  kind: string
+  path: string
 
-fn keysLine(screen: GlobalShortcut, area: GlobalShortcut): string = screen.registered and area.registered ? "⌃⌥⇧⌘3 screen · ⌃⌥⇧⌘4 area" : "A shortcut is taken by another app; use the menu bar item."
+shape Viewport
+  width: number
+  height: number
+  devicePixelRatio: option<number>
+
+fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut): string = a.registered and b.registered and c.registered and d.registered ? "Hyper 3 screen · 4 area · 5 record · 2 text" : "A shortcut is taken by another app; use the menu bar item."
+fn clock(ms: number): string = `${floor(ms / 60000)}:${floor(ms / 1000) % 60 < 10 ? "0" : ""}${floor(ms / 1000) % 60}`
+fn sizeLine(c: Capture): string = c.kind == "png" ? `${c.width}×${c.height}` : `${c.kind.toUpperCase()} ${clock(c.duration)} · ${c.width}×${c.height}`
+fn strokeOf(level: number, unit: number): number = (level == 1 ? 3 : level == 2 ? 6 : 12) * unit
 
 component Glint
   resource captures = captures() as shape Capture[] else empty()
   resource screenKey = globalShortcut(id="screen", keys="Control+Alt+Shift+Meta+3") as shape GlobalShortcut else empty(id="screen", keys="Control+Alt+Shift+Meta+3", registered=false)
   resource areaKey = globalShortcut(id="area", keys="Control+Alt+Shift+Meta+4") as shape GlobalShortcut else empty(id="area", keys="Control+Alt+Shift+Meta+4", registered=false)
+  resource recordKey = globalShortcut(id="record", keys="Control+Alt+Shift+Meta+5") as shape GlobalShortcut else empty(id="record", keys="Control+Alt+Shift+Meta+5", registered=false)
+  resource textKey = globalShortcut(id="text", keys="Control+Alt+Shift+Meta+2") as shape GlobalShortcut else empty(id="text", keys="Control+Alt+Shift+Meta+2", registered=false)
+  resource request = requests() as shape Request else empty(seq=0, kind="", path="")
+  resource viewport = exactViewport() as shape Viewport
+  mutation area as shape Area then afterArea
   mutation staged as shape Staged then afterStaged
   mutation shot as shape Capture refreshes captures then afterShot
-  mutation area as shape Area then afterArea
+  mutation recording as shape Recording then afterRecording
+  mutation read as shape DetectedTextList then afterRead
+  mutation opened as shape Edit then afterOpened
+  mutation saved as shape Capture refreshes captures then afterSaved
+  mutation shown as shape Reply
+  mutation hud as shape Reply
   mutation copied as shape Reply
+  mutation acted as shape Reply
   mutation removed as shape Reply refreshes captures
+
+  // Settings, kept across launches.
+  state copyAfter = true persist
+  state quickAfter = true persist
+  state recFormat = "mp4" persist
+  state recCursor = true persist
+  state recClicks = true persist
+  state recAudio = false persist
+  state recMic = false persist
+
+  // The library and what a capture is for.
   state selected = ""
+  state note = ""
+  state picking = ""
+  state recordingOn = false
+  state recX = 0
+  state recY = 0
+  state recW = 0
+  state recH = 0
   derive current = first(captures.filter(c => c.path == selected))
-  derive busy = pending(staged) or pending(shot) or pending(area)
-  derive problem = match failure(staged) { case some(f) => `Capture failed: ${f.message}`, case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(area) { case some(f) => `Area picker failed: ${f.message}`, case none => "" } } }
+  derive busy = pending(staged) or pending(shot) or pending(area) or pending(recording)
+  derive problem = match failure(staged) { case some(f) => `Capture failed: ${f.message}`, case none => match failure(shot) { case some(f) => `Saving failed: ${f.message}`, case none => match failure(recording) { case some(f) => `Recording failed: ${f.message}`, case none => match failure(saved) { case some(f) => `Saving the edit failed: ${f.message}`, case none => match failure(read) { case some(f) => `Text recognition failed: ${f.message}`, case none => "" } } } } }
+
+  // The editor. Marks and the crop are in the image's pixels.
+  state editing = ""
+  state tool = "arrow"
+  state color = "#ff3b30"
+  state level = 2
+  state marks = []
+  state undone = []
+  state drawing = false
+  state sx = 0
+  state sy = 0
+  state ex = 0
+  state ey = 0
+  state pts = ""
+  state background = false
+  state cx = 0
+  state cy = 0
+  state cw = 0
+  state ch = 0
+  state textOn = false
+  state tx = 0
+  state ty = 0
+  state textLeft = 0
+  state textTop = 0
+  state textValue = ""
+  state exporting = false
+  derive editCap = first(captures.filter(c => c.path == editing))
+  derive iw = match editCap { case some(c) => c.width, case none => 1 }
+  derive ih = match editCap { case some(c) => c.height, case none => 1 }
+  derive mosaic = match editCap { case some(c) => c.mosaic, case none => "" }
+  derive vx = cw > 0 ? cx : 0
+  derive vy = cw > 0 ? cy : 0
+  derive vw = cw > 0 ? cw : iw
+  derive vh = cw > 0 ? ch : ih
+  derive pad = background ? round(max(vw, vh) * 0.07) : 0
+  derive bw = vw + 2 * pad
+  derive bh = vh + 2 * pad
+  derive availW = max(200, viewport.width - 32)
+  derive availH = max(150, viewport.height - 100)
+  derive cssW = min(availW, availH * bw / bh)
+  derive cssH = cssW * bh / bw
+  derive k = bw / cssW
+  derive dpr = match viewport.devicePixelRatio { case some(r) => max(1, r), case none => 2 }
+  derive unit = max(1, round(max(iw, ih) / 1500))
+  derive stroke = strokeOf(level, unit)
+  derive steps = marks.filter(m => m.kind == "step").length
+  derive typed = Mark(kind="text", color=color, size=stroke, x1=tx, y1=ty, x2=tx, y2=ty, points="", text=textValue, n=0)
+  derive withText = textOn and textValue.trim() != "" ? marks.concat([typed]) : marks
+  derive draft = Mark(kind=tool, color=color, size=stroke, x1=sx, y1=sy, x2=ex, y2=ey, points=pts, text="", n=0)
+
+  // Taking pictures.
   action screen
     if not busy
+      picking = "screen"
       send staged = captureScreen()
-  action pick
+  action pickArea
     if not busy
-      send area = pickArea()
+      picking = "area"
+      send area = pick("area")
+  action pickWindow
+    if not busy
+      picking = "window"
+      send area = pick("window")
+  action pickText
+    if not busy
+      picking = "text"
+      send area = pick("area")
+  action record
+    if recordingOn
+      stop()
+    else
+      if not busy
+        picking = "record"
+        send area = pick("record")
+  action stop
+    recordingOn = false
+    send hud = hideHud()
+    send staged = stopRecording()
   action afterArea
     match area
       case some(a)
         if a.picked
-          send staged = captureArea(a.x, a.y, a.width, a.height)
+          if picking == "record"
+            recX = a.x
+            recY = a.y
+            recW = a.width
+            recH = a.height
+            send recording = startRecording(a.x, a.y, a.width, a.height, recFormat, recCursor, recClicks, recAudio, recMic)
+          else
+            if a.window != 0
+              send staged = captureWindow(a.window)
+            else
+              send staged = captureArea(a.x, a.y, a.width, a.height)
       case none
-        selected = selected
+        note = ""
+  action afterRecording
+    match recording
+      case some(r)
+        recordingOn = r.recording
+        send hud = showHud(recX, recY, recW, recH)
+      case none
+        recordingOn = false
   action afterStaged
     match staged
       case some(s)
-        send shot = keepCapture(s.path, s.taken, s.width, s.height)
+        if picking == "text"
+          send read = detectText(image=s.path)
+        else
+          send shot = keepCapture(s.path, s.taken, s.width, s.height, s.kind, s.duration, s.mosaic)
       case none
-        selected = selected
+        note = ""
   action afterShot
     match shot
       case some(c)
         selected = c.path
-        send copied = copyCapture(c.path)
+        note = copyAfter ? "Copied" : "Saved"
+        if copyAfter
+          send copied = copyCapture(c.shown, c.kind)
+        if quickAfter
+          send shown = showQuick(c.shown, c.kind)
       case none
-        selected = selected
+        note = ""
+  action afterRead
+    match read
+      case some(r)
+        note = r.texts.length == 0 ? "No text found" : `Copied ${r.texts.length} ${r.texts.length == 1 ? "line" : "lines"} of text`
+        send copied = copyText(r.texts.map(t => t.rawValue).join("\n"))
+      case none
+        note = ""
   action pressed(id: string)
     if id == "area"
-      pick()
-    else
+      pickArea()
+    if id == "record"
+      record()
+    if id == "text"
+      pickText()
+    if id == "screen"
       screen()
+
+  // What a floating panel asked for.
+  task takeRequest when request.seq > 0 key=request.seq
+    change(onRequest)
+  action onRequest
+    if request.kind == "annotate"
+      annotate(request.path)
+      focus()
+    if request.kind == "stopRecording" and recordingOn
+      stop()
+
+  // The library.
   action choose(path: string)
     selected = path
   action copy
-    send copied = copyCapture(selected)
+    match current
+      case some(c)
+        note = "Copied"
+        send copied = copyCapture(c.shown, c.kind)
+      case none
+        note = ""
+  action pin
+    match current
+      case some(c)
+        send acted = pinCapture(c.shown)
+      case none
+        note = ""
+  action reveal
+    send acted = revealCapture(selected)
   action remove
-    send removed = deleteCapture(selected)
-    selected = ""
+    match current
+      case some(c)
+        send removed = deleteCapture(c.path, c.stem)
+        selected = ""
+      case none
+        note = ""
   action open
     focus()
+
+  // The editor.
+  action annotate(path: string)
+    editing = path
+    selected = path
+    marks = []
+    undone = []
+    cw = 0
+    background = false
+    textOn = false
+    drawing = false
+    send opened = openEdit(path)
+  action afterOpened
+    match opened
+      case some(o)
+        if o.path == editing
+          marks = o.marks
+          background = o.background
+          cx = o.cx
+          cy = o.cy
+          cw = o.cw
+          ch = o.ch
+      case none
+        note = ""
+  action useTool(name: string)
+    placeText()
+    tool = name
+  action useColor(value: string)
+    color = value
+  action useLevel(value: number)
+    level = value
+  action toggleBackground
+    background = not background
+  action down(e: PointerEvent)
+    let x = round(e.offsetX * k - pad + vx)
+    let y = round(e.offsetY * k - pad + vy)
+    if textOn
+      placeText()
+    else
+      if tool == "text"
+        textOn = true
+        tx = x
+        ty = y
+        textLeft = e.offsetX
+        textTop = e.offsetY
+        textValue = ""
+        focus("text-entry")
+      else
+        if tool == "step"
+          marks = marks.concat([Mark(kind="step", color=color, size=stroke, x1=x, y1=y, x2=x, y2=y, points="", text="", n=steps + 1)])
+          undone = []
+        else
+          drawing = true
+          sx = x
+          sy = y
+          ex = x
+          ey = y
+          pts = `${x},${y}`
+  action move(e: PointerEvent)
+    if drawing
+      let x = round(e.offsetX * k - pad + vx)
+      let y = round(e.offsetY * k - pad + vy)
+      ex = x
+      ey = y
+      if tool == "pen" or tool == "marker"
+        pts = `${pts} ${x},${y}`
+  action up(e: PointerEvent)
+    if drawing
+      drawing = false
+      if tool == "crop"
+        if max(ex - sx, sx - ex) > 8 and max(ey - sy, sy - ey) > 8
+          cx = max(0, min(sx, ex))
+          cy = max(0, min(sy, ey))
+          cw = min(iw - max(0, min(sx, ex)), max(ex - sx, sx - ex))
+          ch = min(ih - max(0, min(sy, ey)), max(ey - sy, sy - ey))
+          tool = "arrow"
+      else
+        if tool == "pen" or tool == "marker" or max(ex - sx, sx - ex) + max(ey - sy, sy - ey) > 4
+          marks = marks.concat([draft])
+          undone = []
+  action typeText(value: string)
+    textValue = value
+  action placeText
+    if textOn
+      textOn = false
+      if textValue.trim() != ""
+        marks = withText
+        undone = []
+  action undo
+    if marks.length > 0
+      undone = undone.concat(marks.slice(marks.length - 1, marks.length))
+      marks = marks.slice(0, marks.length - 1)
+  action redo
+    if undone.length > 0
+      marks = marks.concat(undone.slice(undone.length - 1, undone.length))
+      undone = undone.slice(0, undone.length - 1)
+  action resetCrop
+    cw = 0
+  action save
+    placeText()
+    exporting = true
+    send saved = saveEdit(editing, withText, background, cx, cy, cw, ch)
+  action afterSaved
+    match saved
+      case some(c)
+        exporting = false
+        editing = ""
+        selected = c.path
+        note = copyAfter ? "Saved and copied" : "Saved"
+        if copyAfter
+          send copied = copyCapture(c.shown, c.kind)
+      case none
+        exporting = false
+  action cancel
+    if textOn
+      textOn = false
+    else
+      editing = ""
+  action editKey(key: string, e: KeyboardEvent)
+    if key == "Escape"
+      cancel()
+    if not textOn and not e.metaKey
+      if key == "a"
+        useTool("arrow")
+      if key == "r"
+        useTool("rect")
+      if key == "o"
+        useTool("ellipse")
+      if key == "l"
+        useTool("line")
+      if key == "p"
+        useTool("pen")
+      if key == "h"
+        useTool("marker")
+      if key == "t"
+        useTool("text")
+      if key == "b"
+        useTool("pixelate")
+      if key == "n"
+        useTool("step")
+      if key == "s"
+        useTool("spotlight")
+      if key == "c"
+        useTool("crop")
+
+  // Settings.
+  action flipCopy(checked: bool)
+    copyAfter = checked
+  action flipQuick(checked: bool)
+    quickAfter = checked
+  action flipCursor(checked: bool)
+    recCursor = checked
+  action flipClicks(checked: bool)
+    recClicks = checked
+  action flipAudio(checked: bool)
+    recAudio = checked
+  action flipMic(checked: bool)
+    recMic = checked
+  action useFormat(value: string)
+    recFormat = value
+
   view
     column globalshortcut=pressed width="100%" height="100%"
       button -exact-menu="status" aria-label="Glint" popovertarget="glint-menu" testId="status"
-        image (busy ? "symbol:sf/circle.dashed" : "symbol:sf/camera.viewfinder")
+        image (recordingOn ? "symbol:sf/stop.circle.fill" : busy ? "symbol:sf/circle.dashed" : "symbol:sf/camera.viewfinder")
       column id="glint-menu" popover="auto" role="menu" aria-label="Glint"
+        if recordingOn
+          button press=stop testId="menu-stop"
+            text "Stop Recording"
+          hr
         button press=screen testId="menu-screen"
           text "Capture Screen"
-        button press=pick testId="menu-area"
+        button press=pickArea testId="menu-area"
           text "Capture Area"
+        button press=pickWindow testId="menu-window"
+          text "Capture Window"
+        button press=pickText testId="menu-text"
+          text "Capture Text"
+        if not recordingOn
+          button press=record testId="menu-record"
+            text "Record Screen"
         hr
         button press=open testId="menu-open"
           text "Open Glint"
-      row gap=8 padding=8 align-items="center" border-bottom="1px solid -exact-separator"
-        button press=screen disabled=busy testId="screen"
-          text "Screen"
-        button press=pick disabled=busy testId="area"
-          text "Area"
-        text (problem != "" ? problem : keysLine(screenKey, areaKey)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
-      row flex=1 min-height=0
-        scroll width=220 border-right="1px solid -exact-separator"
-          column testId="list"
-            if captures.length == 0
-              text "No captures yet." padding=8 font-size=12 color="-exact-secondary-label" testId="empty"
-            for c in captures key=c.path
-              button press=choose(c.path) padding=6 gap=8 display="flex" align-items="center" background-color=(c.path == selected ? "-exact-fill" : "transparent") testId=`row-${c.name}`
-                image c.path width=56 height=36 object-fit="cover"
-                column flex=1 min-width=0 align-items="flex-start"
-                  text formatDate(c.taken, 0, "medium") font-size=12
-                  text `${c.width}×${c.height}` font-size=11 color="-exact-secondary-label"
-        column flex=1 min-width=0 padding=8 gap=8
-          match current
-            case some(c)
-              row gap=8 align-items="center"
-                text c.name flex=1 font-size=12 color="-exact-secondary-label" testId="current"
-                button press=copy testId="copy"
-                  text "Copy"
-                button press=remove testId="delete"
-                  text "Delete"
-              image c.path width="100%" flex=1 min-height=0 object-fit="contain" testId="preview"
-            case none
-              text "Pick a capture." color="-exact-secondary-label" testId="hint"
+      if editing != ""
+        column flex=1 min-height=0 key=editKey tabindex=0 testId="editor"
+          row gap=4 padding=6 align-items="center" border-bottom="1px solid -exact-separator" testId="tools"
+            for t in ["arrow", "rect", "ellipse", "line", "pen", "marker", "text", "pixelate", "step", "spotlight", "crop"] key=t
+              button press=useTool(t) aria-label=t aria-pressed=(tool == t) padding=4 border-radius=5 background-color=(tool == t ? "-exact-fill" : "transparent") testId=`tool-${t}`
+                image (t == "arrow" ? "symbol:sf/arrow.up.right" : t == "rect" ? "symbol:sf/rectangle" : t == "ellipse" ? "symbol:circle" : t == "line" ? "symbol:sf/line.diagonal" : t == "pen" ? "symbol:sf/scribble" : t == "marker" ? "symbol:sf/highlighter" : t == "text" ? "symbol:sf/textformat" : t == "pixelate" ? "symbol:sf/checkerboard.rectangle" : t == "step" ? "symbol:sf/1.circle" : t == "spotlight" ? "symbol:sf/flashlight.on.fill" : "symbol:sf/crop") width=16 height=16
+            hr height=18 width=1
+            for c in ["#ff3b30", "#ff9500", "#ffcc00", "#34c759", "#0a84ff", "#bf5af2", "#ffffff", "#000000"] key=c
+              button press=useColor(c) aria-label=c aria-pressed=(color == c) width=18 height=18 border-radius=9 background-color=c border=(color == c ? "2px solid -exact-label" : "1px solid -exact-separator") testId=`color-${c}`
+            hr height=18 width=1
+            for n in [1, 2, 3] key=n
+              button press=useLevel(n) aria-label=`size ${n}` aria-pressed=(level == n) padding=4 border-radius=5 background-color=(level == n ? "-exact-fill" : "transparent") testId=`size-${n}`
+                text (n == 1 ? "S" : n == 2 ? "M" : "L") font-size=11
+            hr height=18 width=1
+            button press=toggleBackground aria-pressed=background padding=4 border-radius=5 background-color=(background ? "-exact-fill" : "transparent") testId="background"
+              text "Background" font-size=11
+            if cw > 0
+              button press=resetCrop padding=4 testId="reset-crop"
+                text "Uncrop" font-size=11
+            view flex=1
+            button press=undo aria-keyshortcuts="Meta+Z" aria-label="Undo" disabled=(marks.length == 0) testId="undo"
+              image "symbol:sf/arrow.uturn.backward" width=14 height=14
+            button press=redo aria-keyshortcuts="Shift+Meta+Z" aria-label="Redo" disabled=(undone.length == 0) testId="redo"
+              image "symbol:sf/arrow.uturn.forward" width=14 height=14
+            button press=cancel testId="cancel"
+              text "Cancel"
+            button press=save aria-keyshortcuts="Meta+S" disabled=(pending(saved)) testId="save"
+              text "Save"
+          column flex=1 min-height=0 align-items="center" justify-content="center" padding=16 testId="stage"
+            box position="relative" width=cssW height=cssH overflow="hidden"
+              // Saving draws the picture again at its own pixels (CSS size x the display's scale), under this one.
+              if exporting
+                canvas surface=export(editing, mosaic, withText, draft, false, vx, vy, vw, vh, pad, unit) width=(bw / dpr) height=(bh / dpr) position="absolute" left=0 top=0 pointer-events="none" testId="export"
+              canvas surface=annotate(editing, mosaic, marks, draft, drawing, vx, vy, vw, vh, pad, unit) position="relative" width=cssW height=cssH pointerdown=down pointermove=move pointerup=up touch-action="none" cursor="crosshair" testId="ink"
+              if textOn
+                input id="text-entry" value=textValue input=typeText submit=placeText placeholder="Text" position="absolute" left=textLeft top=(textTop - stroke * 2 / k) width=220 font-size=(stroke * 3.5 / k) color=color background-color="transparent" border="1px dashed -exact-separator" testId="text-entry"
+      else
+        column flex=1 min-height=0
+          row gap=8 padding=8 align-items="center" border-bottom="1px solid -exact-separator"
+            button press=screen disabled=busy testId="screen"
+              text "Screen"
+            button press=pickArea disabled=busy testId="area"
+              text "Area"
+            button press=pickWindow disabled=busy testId="window"
+              text "Window"
+            button press=pickText disabled=busy testId="text"
+              text "Text"
+            button press=record disabled=(busy and not recordingOn) testId="record"
+              text (recordingOn ? "Stop" : "Record")
+            text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
+            button popovertarget="settings" aria-label="Settings" testId="settings-button"
+              image "symbol:settings" width=14 height=14
+            column id="settings" popover="auto" padding=12 gap=8 testId="settings"
+              text "After a capture" font-size=11 color="-exact-secondary-label"
+              row gap=6 align-items="center"
+                input type="checkbox" checked=copyAfter change=flipCopy aria-label="Copy to the clipboard" testId="set-copy"
+                text "Copy to the clipboard" font-size=12
+              row gap=6 align-items="center"
+                input type="checkbox" checked=quickAfter change=flipQuick aria-label="Show the floating thumbnail" testId="set-quick"
+                text "Show the floating thumbnail" font-size=12
+              text "Recording" font-size=11 color="-exact-secondary-label"
+              row gap=6 align-items="center"
+                select value=recFormat change=useFormat aria-label="Format" testId="set-format"
+                  option "MP4" value="mp4"
+                  option "GIF" value="gif"
+              row gap=6 align-items="center"
+                input type="checkbox" checked=recCursor change=flipCursor aria-label="Show the cursor" testId="set-cursor"
+                text "Show the cursor" font-size=12
+              row gap=6 align-items="center"
+                input type="checkbox" checked=recClicks change=flipClicks aria-label="Highlight clicks" testId="set-clicks"
+                text "Highlight clicks" font-size=12
+              row gap=6 align-items="center"
+                input type="checkbox" checked=recAudio change=flipAudio aria-label="Record system audio" testId="set-audio"
+                text "Record system audio" font-size=12
+              row gap=6 align-items="center"
+                input type="checkbox" checked=recMic change=flipMic aria-label="Record the microphone" testId="set-mic"
+                text "Record the microphone" font-size=12
+          row flex=1 min-height=0
+            scroll width=230 border-right="1px solid -exact-separator"
+              column testId="list"
+                if captures.length == 0
+                  text "No captures yet." padding=8 font-size=12 color="-exact-secondary-label" testId="empty"
+                for c in captures key=c.path
+                  button press=choose(c.path) dblclick=annotate(c.path) padding=6 gap=8 display="flex" align-items="center" background-color=(c.path == selected ? "-exact-fill" : "transparent") testId=`row-${c.name}`
+                    if c.kind == "mp4"
+                      column width=56 height=36 align-items="center" justify-content="center" background-color="-exact-fill"
+                        image "symbol:sf/video.fill" width=16 height=16 color="-exact-secondary-label"
+                    else
+                      image c.shown width=56 height=36 object-fit="cover"
+                    column flex=1 min-width=0 align-items="flex-start"
+                      text formatDate(c.taken, 0, "medium") font-size=12
+                      text sizeLine(c) font-size=11 color="-exact-secondary-label"
+            column flex=1 min-width=0 padding=8 gap=8
+              match current
+                case some(c)
+                  row gap=8 align-items="center"
+                    text c.name flex=1 font-size=12 color="-exact-secondary-label" testId="current"
+                    if c.kind == "png"
+                      button press=annotate(c.path) testId="annotate"
+                        text "Annotate"
+                      button press=pin testId="pin"
+                        text "Pin"
+                    button press=copy aria-keyshortcuts="Meta+C" testId="copy"
+                      text "Copy"
+                    button press=reveal testId="reveal"
+                      text "Show in Finder"
+                    button press=remove testId="delete"
+                      text "Delete"
+                  if c.kind == "mp4"
+                    video src=c.path controls=true width="100%" flex=1 min-height=0 testId="player"
+                  else
+                    image c.shown width="100%" flex=1 min-height=0 object-fit="contain" testId="preview"
+                case none
+                  text "Pick a capture." color="-exact-secondary-label" testId="hint"

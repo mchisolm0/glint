@@ -1,10 +1,80 @@
 test "a new install has no captures and names its shortcuts"
   clock data
   expect text "empty" == "No captures yet."
-  expect text "status-line" == "⌃⌥⇧⌘3 screen · ⌃⌥⇧⌘4 area"
+  expect text "status-line" == "Hyper 3 screen · 4 area · 5 record · 2 text"
 
-test "a capture lands in the list, selected"
+test "a capture lands in the list, selected and copied"
   tap "screen"
   clock data
   expect tree has "preview"
   expect tree missing "empty"
+  expect text "status-line" == "Copied"
+
+test "an area capture is the picked area at the display's scale"
+  tap "area"
+  clock data
+  expect state current.width >= 400
+  expect state current.height >= 300
+
+test "an arrow drawn and saved becomes the capture's annotated render"
+  tap "screen"
+  clock data
+  tap "annotate"
+  tap "ink" drag 120 60
+  expect enabled "undo"
+  expect state marks.length == 1
+  tap "save"
+  clock data
+  expect tree missing "editor"
+  expect state current.edited == true
+  tap "annotate"
+  clock data
+  expect state marks.length == 1
+
+test "undo takes the last mark back and redo restores it"
+  tap "screen"
+  clock data
+  tap "annotate"
+  tap "tool-rect"
+  tap "ink" drag 80 40
+  tap "tool-ellipse"
+  tap "ink" drag 40 80
+  expect state marks.length == 2
+  tap "undo"
+  expect state marks.length == 1
+  tap "redo"
+  expect state marks.length == 2
+
+test "text typed on the picture is a mark"
+  tap "screen"
+  clock data
+  tap "annotate"
+  tap "tool-text"
+  tap "ink"
+  type "text-entry" "Look here"
+  type "text-entry" key "Enter"
+  expect state marks.length == 1
+  expect state marks.0.text == "Look here"
+
+test "steps number themselves"
+  tap "screen"
+  clock data
+  tap "annotate"
+  tap "tool-step"
+  tap "ink"
+  tap "ink" drag 50 0
+  expect state marks.1.n == 2
+
+test "cancel leaves the capture as it was"
+  tap "screen"
+  clock data
+  tap "annotate"
+  tap "ink" drag 120 60
+  tap "cancel"
+  expect tree missing "editor"
+  expect state current.edited == false
+
+test "settings are kept"
+  tap "settings-button"
+  tap "set-copy"
+  expect state copyAfter == false

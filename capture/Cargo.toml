@@ -6,7 +6,13 @@ license.workspace = true
 publish = false
 workspace = "../.exact/shells"
 
-# xcap does the platform work: CoreGraphics on macOS, X11 or the xdg portal on Linux, DXGI on Windows.
+# One API (src/lib.rs) over a back end per platform: ScreenCaptureKit on macOS (src/mac.rs), and later
+# xdg-desktop-portal plus PipeWire on Linux (src/linux.rs). PNG and GIF encoding are shared.
 [dependencies]
-xcap = "0.9"
-image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.18"
+gif = "0.14"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macos_26_0 for SCScreenshotConfiguration, the only API that captures a window with its shadow. Older
+# macOS still runs: the bridge checks availability at run time and window() falls back.
+screencapturekit = { version = "11.1.2", features = ["macos_26_0"] }

@@ -12,7 +12,7 @@
   "host": {
     "web": {},
     "macos": {
-      "minimumOS": "14.0",
+      "minimumOS": "15.0",
       "window": {
         "width": 900,
         "height": 700
