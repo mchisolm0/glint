@@ -14,7 +14,7 @@ struct Pick {
 final class Picker {
     enum Mode { case area, window }
     /// Another app's on-screen window, its frame in global top-left points.
-    struct Target { let id: CGWindowID, frame: CGRect, owner: String }
+    struct Target { let id: CGWindowID, frame: CGRect, owner: String, pid: pid_t }
 
     private(set) var mode: Mode
     /// In `record` a click without a drag picks the whole display.
@@ -73,6 +73,13 @@ final class Picker {
         overlays.forEach { $0.view.refresh(global) }
     }
 
+    /// The front window of the active app, or the frontmost other app's window when Glint is active.
+    static func frontWindow() -> Target? {
+        let windows = windows()
+        let active = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        return windows.first { $0.pid == active } ?? windows.first
+    }
+
     /// On-screen windows of other apps at the normal level, front to back.
     private static func windows() -> [Target] {
         let own = getpid()
@@ -85,7 +92,8 @@ final class Picker {
                   let bounds = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds),
                   frame.width >= 40, frame.height >= 40 else { return nil }
-            return Target(id: id, frame: frame, owner: info[kCGWindowOwnerName as String] as? String ?? "")
+            return Target(id: id, frame: frame, owner: info[kCGWindowOwnerName as String] as? String ?? "",
+                          pid: info[kCGWindowOwnerPID as String] as? pid_t ?? 0)
         }
     }
 }

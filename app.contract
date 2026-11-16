@@ -49,7 +49,7 @@ shape Viewport
   height: number
   devicePixelRatio: option<number>
 
-fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut, e: GlobalShortcut, linux: bool): string = a.registered and b.registered and c.registered and d.registered and e.registered ? (linux ? "Shift+Ctrl+Alt+Super 3 screen · 4 area · 5 record · 6 scroll" : "Hyper 3 screen · 4 area · 5 record · 6 scroll · 2 text") : linux ? "A shortcut is not set; set them in Settings, Apps, Glint." : "A shortcut is taken by another app; use the menu bar item."
+fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut, e: GlobalShortcut, f: GlobalShortcut, linux: bool): string = a.registered and b.registered and c.registered and d.registered and e.registered and f.registered ? (linux ? "Shift+Ctrl+Alt+Super 3 screen · 4 area · 2 window · 5 record · 1 scroll" : "Hyper 3 screen · 4 area · 2 window · 5 record · 1 scroll · T text") : linux ? "A shortcut is not set; set them in Settings, Apps, Glint." : "A shortcut is taken by another app; use the menu bar item."
 fn clock(ms: number): string = `${floor(ms / 60000)}:${floor(ms / 1000) % 60 < 10 ? "0" : ""}${floor(ms / 1000) % 60}`
 fn sizeLine(c: Capture): string = c.kind == "png" ? `${c.width}×${c.height}` : `${c.kind.toUpperCase()} ${clock(c.duration)} · ${c.width}×${c.height}`
 // A failure worth showing: a picker the person cancelled is not one.
@@ -63,8 +63,9 @@ component Glint
   resource screenKey = globalShortcut(id="screen", keys="Control+Alt+Shift+Meta+3") as shape GlobalShortcut else empty(id="screen", keys="Control+Alt+Shift+Meta+3", registered=false)
   resource areaKey = globalShortcut(id="area", keys="Control+Alt+Shift+Meta+4") as shape GlobalShortcut else empty(id="area", keys="Control+Alt+Shift+Meta+4", registered=false)
   resource recordKey = globalShortcut(id="record", keys="Control+Alt+Shift+Meta+5") as shape GlobalShortcut else empty(id="record", keys="Control+Alt+Shift+Meta+5", registered=false)
-  resource textKey = globalShortcut(id="text", keys="Control+Alt+Shift+Meta+2") as shape GlobalShortcut else empty(id="text", keys="Control+Alt+Shift+Meta+2", registered=false)
-  resource scrollKey = globalShortcut(id="scroll", keys="Control+Alt+Shift+Meta+6") as shape GlobalShortcut else empty(id="scroll", keys="Control+Alt+Shift+Meta+6", registered=false)
+  resource textKey = globalShortcut(id="text", keys="Control+Alt+Shift+Meta+T") as shape GlobalShortcut else empty(id="text", keys="Control+Alt+Shift+Meta+T", registered=false)
+  resource scrollKey = globalShortcut(id="scroll", keys="Control+Alt+Shift+Meta+1") as shape GlobalShortcut else empty(id="scroll", keys="Control+Alt+Shift+Meta+1", registered=false)
+  resource windowKey = globalShortcut(id="window", keys="Control+Alt+Shift+Meta+2") as shape GlobalShortcut else empty(id="window", keys="Control+Alt+Shift+Meta+2", registered=false)
   resource request = requests() as shape Request else empty(seq=0, kind="", path="")
   resource viewport = exactViewport() as shape Viewport
   resource platform = platform() as shape Platform else empty(os="")
@@ -178,6 +179,11 @@ component Glint
     if not busy
       picking = "window"
       send area = pick("window")
+  // The window that has focus, with no overlay. Linux has no way to name it, so the desktop's picker asks.
+  action frontWindow
+    if not busy
+      picking = "window"
+      send area = pick("front")
   action pickText
     if onLinux
       note = "No text recognition on Linux yet."
@@ -267,6 +273,8 @@ component Glint
       screen()
     if id == "scroll"
       scrollCapture()
+    if id == "window"
+      frontWindow()
 
   // What a floating panel asked for.
   task takeRequest when request.seq > 0 key=request.seq
@@ -543,7 +551,7 @@ component Glint
             text "Text"
         button press=record disabled=(busy and not recordingOn) testId="record"
           text (recordingOn and not scrolling ? "Stop" : "Record")
-        text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey, scrollKey, onLinux)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
+        text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey, scrollKey, windowKey, onLinux)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
         button popovertarget="settings" aria-label="Settings" testId="settings-button"
           image "symbol:settings" width=14 height=14
         column id="settings" popover="auto" color-scheme="dark" padding=12 gap=8 testId="settings"

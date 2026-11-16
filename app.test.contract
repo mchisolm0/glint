@@ -1,7 +1,7 @@
 test "a new install has no captures and names its shortcuts"
   clock data
   expect text "empty" == "No captures yet."
-  expect text "status-line" == "Hyper 3 screen · 4 area · 5 record · 6 scroll · 2 text"
+  expect text "status-line" == "Hyper 3 screen · 4 area · 2 window · 5 record · 1 scroll · T text"
 
 test "a capture lands in the list, open in the editor and copied"
   tap "screen"

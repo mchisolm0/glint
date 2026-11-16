@@ -118,6 +118,13 @@ final class Glint: ExactModule {
     private func pick(_ mode: String, _ reply: ExactReply) {
         guard picker == nil else { return reply.fail("pick: already picking") }
         let none: [String: Any] = ["picked": false, "x": 0, "y": 0, "width": 0, "height": 0, "window": 0]
+        // `front` picks without an overlay: the window that has focus.
+        if mode == "front" {
+            guard let target = Picker.frontWindow() else { return reply.send(none) }
+            return reply.send(["picked": true, "x": Double(target.frame.minX), "y": Double(target.frame.minY),
+                               "width": Double(target.frame.width), "height": Double(target.frame.height),
+                               "window": Int(target.id)])
+        }
         let picker = Picker(mode: mode)
         self.picker = picker
         picker.start { [weak self] pick in

@@ -93,7 +93,7 @@ presentation.
 
 ## 5. Field report: what a screenshot tool needed beyond the box
 
-Glint: Hyper+3 screen, +4 area or window, +5 record, +6 scrolling capture, +2 text (OCR); a quick-access thumbnail, pins, an annotation
+Glint: Hyper+3 screen, +4 area or window, +2 the focused window, +5 record, +1 scrolling capture, +T text (OCR); a quick-access thumbnail, pins, an annotation
 editor (arrow, box, ellipse, line, pen, highlighter, text, pixelate, steps, spotlight, crop, background), MP4 and
 GIF recording. One Contract file, ~300 lines of `app.ts`, a Rust capture crate, a Swift module for the Mac's windows.
 

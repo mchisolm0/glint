@@ -52,7 +52,7 @@ packages' calls) though no module answers the app's.
 
 | op | Request | Reply |
 |---|---|---|
-| `pick` | `mode`: `"area"`, `"window"` or `"record"` | `{picked, x, y, width, height, window}`. Space toggles area and window. A window pick sets `window` (CGWindowID) and its frame; otherwise `window` is 0. In `record`, a click without a drag picks the whole display under it. Escape or a right click: `picked: false` |
+| `pick` | `mode`: `"area"`, `"window"`, `"record"` or `"front"` (no overlay: the focused window, or the frontmost other app's when Glint has focus) | `{picked, x, y, width, height, window}`. Space toggles area and window. A window pick sets `window` (CGWindowID) and its frame; otherwise `window` is 0. In `record`, a click without a drag picks the whole display under it. Escape or a right click: `picked: false` |
 | `adopt` | `from` (native path), `to` (`app:/data/...`) | `{path}`; moves the file and calls `wrote` |
 | `quick` | `path` (`app:/`), `kind` | `{ok}`; shows the quick-access panel |
 | `pin` | `path` | `{ok}`; a floating, always-on-top image |

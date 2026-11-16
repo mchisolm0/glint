@@ -9,8 +9,9 @@ on the Mac and the desktop portal on Linux.
 | 3 | Capture the screen under the pointer |
 | 4 | Drag out an area; Space switches to picking a window; Escape cancels |
 | 5 | Record an area or a display (a click picks the display); again to stop |
-| 6 | Scrolling capture: pick an area, scroll it, then Done (or Hyper+6 again) |
-| 2 | Capture text (OCR) to the clipboard |
+| 2 | Capture the window that has focus |
+| 1 | Scrolling capture: pick an area, scroll it, then Done (or Hyper+1 again) |
+| T | Capture text (OCR) to the clipboard |
 
 After a capture: it is copied, and a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out). Every
 screenshot opens in the editor, no mode to enter: A arrow, R box, O ellipse, L line, P pen, H highlighter, T text,
