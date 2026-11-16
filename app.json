@@ -27,7 +27,11 @@
         "height": 700
       }
     },
-    "linux": {}
+    "linux": {
+      "window": {
+        "keepRunning": true
+      }
+    }
   },
   "deploy": {
     "store": {
