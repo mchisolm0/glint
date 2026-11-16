@@ -4,7 +4,8 @@
 //! a sticky header, a status bar) are the frame's fixed edges; the rows between them are the band that
 //! scrolls. The best vertical offset between two bands extends the picture down (or up, scrolling back past
 //! the start). Rows are compared by a hash of their pixels, leaving out the right edge, where an overlay
-//! scroll bar slides over the content.
+//! scroll bar slides over the content. A window is cut to the columns its first scroll changed, so a sidebar
+//! beside them is left out, as the Mac's picked area leaves it out.
 
 use crate::frames::{self, Encoder, Frames, Message};
 use crate::{write_mosaic, write_png, Result, Video};
@@ -15,27 +16,106 @@ use std::path::Path;
 pub(crate) fn start(path: &Path, width: u32, height: u32) -> Result<(Frames, Encoder)> {
     let path = path.to_owned();
     frames::spawn("glint-scroll", width, height, move |rx| {
-        let mut stitch: Option<(Opaque, Stitch)> = None;
+        let mut capture = Capture::new(width as usize, height as usize);
         loop {
             match rx.recv() {
-                Ok(Message::Frame(rgba, _)) => {
-                    let (part, stitch) = stitch.get_or_insert_with(|| {
-                        let part = Opaque::of(&rgba, width as usize, height as usize);
-                        (part, Stitch::new(part.width, part.height))
-                    });
-                    stitch.add(part.cut(rgba, width as usize));
-                }
+                Ok(Message::Frame(rgba, _)) => capture.add(rgba),
                 Ok(Message::End(_)) => break,
                 Err(_) => return Err("the scrolling capture ended without finishing".into()),
             }
         }
-        let (part, stitch) = stitch.ok_or("the scrolling capture saw no frames")?;
-        let (rgba, rows) = stitch.finish().ok_or("the scrolling capture saw no frames")?;
-        let width = part.width as u32;
-        write_png(&path, &rgba, width, rows as u32)?;
-        write_mosaic(&path, &rgba, width, rows as u32)?;
-        Ok(Video { width, height: rows as u32, duration_ms: 0 })
+        let (rgba, width, rows) = capture.finish().ok_or("the scrolling capture saw no frames")?;
+        eprintln!("glint: stitched {width}x{rows}");
+        let (width, rows) = (width as u32, rows as u32);
+        write_png(&path, &rgba, width, rows)?;
+        write_mosaic(&path, &rgba, width, rows)?;
+        Ok(Video { width, height: rows, duration_ms: 0 })
     })
+}
+
+/// A scrolling capture's frames: cut to the window, then, from the first scroll on, to the columns that
+/// scroll. A sidebar or panel beside them stays put, and rows that span it would never match.
+struct Capture {
+    width: usize,
+    height: usize,
+    part: Option<Opaque>,
+    /// The last frame before the first scroll, cut to `part`.
+    before: Option<Vec<u8>>,
+    /// The scrolling columns, `[left, right)` of `part`, and their stitch.
+    stitch: Option<((usize, usize), Stitch)>,
+}
+
+impl Capture {
+    fn new(width: usize, height: usize) -> Self {
+        Capture { width, height, part: None, before: None, stitch: None }
+    }
+
+    fn add(&mut self, rgba: Vec<u8>) {
+        let part = *self.part.get_or_insert_with(|| Opaque::of(&rgba, self.width, self.height));
+        let frame = part.cut(rgba, self.width);
+        if let Some(((left, right), stitch)) = &mut self.stitch {
+            stitch.add(columns(&frame, part.width, *left, *right));
+            return;
+        }
+        if let Some(before) = &self.before {
+            if let Some((left, right)) = moving(before, &frame, part.width, part.height) {
+                // A change that is no scroll (a redraw as the window gains focus) is not the start.
+                let mut stitch = Stitch::new(right - left, part.height);
+                stitch.add(columns(before, part.width, left, right));
+                stitch.add(columns(&frame, part.width, left, right));
+                if stitch.edges.is_some() {
+                    eprintln!("glint: scrolling columns {left}..{right} of the {}x{} at {},{}", part.width, part.height, part.x, part.y);
+                    self.stitch = Some(((left, right), stitch));
+                    self.before = None;
+                    return;
+                }
+            }
+        }
+        self.before = Some(frame);
+    }
+
+    /// The stitched RGBA, its width and its height. With no scroll, the last frame of the window.
+    fn finish(self) -> Option<(Vec<u8>, usize, usize)> {
+        let part = self.part?;
+        match self.stitch {
+            Some(((left, right), stitch)) => stitch.finish().map(|(rgba, rows)| (rgba, right - left, rows)),
+            None => self.before.map(|f| (f, part.width, part.height)),
+        }
+    }
+}
+
+/// `[left, right)` of each row of a `width`-wide frame.
+fn columns(rgba: &[u8], width: usize, left: usize, right: usize) -> Vec<u8> {
+    if left == 0 && right == width {
+        return rgba.to_vec();
+    }
+    rgba.chunks_exact(width * 4).flat_map(|row| &row[left * 4..right * 4]).copied().collect()
+}
+
+/// The columns that changed between two frames as a scroll changes them, `[left, right)`: the core is every
+/// column with at least a tenth of the busiest one's changed rows (a spinner or clock elsewhere changes far
+/// fewer), widened by the changed columns beside it up to an unchanged one. `None` when the busiest column
+/// changed in under a tenth of the rows.
+fn moving(a: &[u8], b: &[u8], width: usize, height: usize) -> Option<(usize, usize)> {
+    let mut changed = vec![0usize; width];
+    for (ra, rb) in a.chunks_exact(width * 4).zip(b.chunks_exact(width * 4)).take(height) {
+        for (x, (pa, pb)) in ra.chunks_exact(4).zip(rb.chunks_exact(4)).enumerate() {
+            changed[x] += usize::from(pa != pb);
+        }
+    }
+    let most = *changed.iter().max()?;
+    if most * 10 < height {
+        return None;
+    }
+    let mut left = changed.iter().position(|&c| c * 10 >= most)?;
+    let mut right = changed.iter().rposition(|&c| c * 10 >= most)? + 1;
+    while left > 0 && changed[left - 1] > 0 {
+        left -= 1;
+    }
+    while right < width && changed[right] > 0 {
+        right += 1;
+    }
+    Some((left, right))
 }
 
 /// The opaque rectangle of the first frame, which every frame is cut to. GNOME casts a window as a
@@ -358,5 +438,33 @@ mod tests {
         let (rgba, rows) = stitch.finish().unwrap();
         assert_eq!(rows, 10 + (120 + 84 - 20) + 6);
         assert_eq!(&rgba[10 * W * 4..11 * W * 4], &page[20][..]);
+    }
+
+    #[test]
+    fn a_sidebar_beside_the_scrolling_part_is_left_out() {
+        const SIDE: usize = 24;
+        let (page, side) = (page(400), page(500));
+        // A patterned sidebar that stays put, with a spinner in two of its rows, left of the scrolling view.
+        let frame = |scroll: usize, spin: u8| -> Vec<u8> {
+            let view = view(&page, scroll, 100, 10, 6);
+            (0..100)
+                .flat_map(|y| {
+                    let mut row = side[300 + y][..SIDE * 4].to_vec();
+                    if y == 50 || y == 51 {
+                        row[8..12].copy_from_slice(&[spin, 0, 0, 255]);
+                    }
+                    row.extend(&view[y * W * 4..(y + 1) * W * 4]);
+                    row
+                })
+                .collect()
+        };
+        let mut capture = Capture::new(SIDE + W, 100);
+        for (scroll, spin) in [(0, 1), (0, 2), (30, 3), (70, 4)] {
+            capture.add(frame(scroll, spin));
+        }
+        let (rgba, width, rows) = capture.finish().unwrap();
+        assert_eq!((width, rows), (W, 10 + 70 + 84 + 6));
+        assert_eq!(&rgba[10 * W * 4..11 * W * 4], &page[0][..]);
+        assert_eq!(&rgba[(10 + 153) * W * 4..(10 + 154) * W * 4], &page[153][..]);
     }
 }

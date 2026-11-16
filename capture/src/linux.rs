@@ -443,12 +443,19 @@ impl Recording {
             }
             Sink::Frames { encoder, reader } => {
                 // Nothing to finish on GStreamer's side: the frames are ours.
+                if let Ok(Some(status)) = self.gst.child.try_wait() {
+                    eprintln!("glint: GStreamer ended early ({status}): {}", self.gst.failed("no output"));
+                }
                 let _ = self.gst.child.kill();
                 let _ = self.gst.child.wait();
                 if let Some(reader) = reader.take() {
                     let _ = reader.join();
                 }
-                encoder.take().ok_or("the recording already finished")?.finish(end)
+                let made = encoder.take().ok_or("the recording already finished")?.finish(end);
+                if let Err(e) = &made {
+                    eprintln!("glint: the capture did not finish: {e}");
+                }
+                made
             }
         }
     }
@@ -462,7 +469,8 @@ impl Drop for Recording {
 
 pub(crate) fn record(options: &RecordOptions, to: &Path) -> Result<Recording> {
     let started = start(options, to);
-    if started.is_err() {
+    if let Err(e) = &started {
+        eprintln!("glint: the recording did not start: {e}");
         let _ = std::fs::remove_file(to);
     }
     started
@@ -497,6 +505,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
     let cast = cast(options.cursor && !scroll, sources, (!scroll).then_some(token.as_path()))?;
     let even = options.kind == VideoKind::Mp4;
     let crop = region(cast.size, cast.position, options.area, even).ok_or("the area is off the recorded screen")?;
+    eprintln!("glint: {:?} stream {:?} at {:?}, kept {}x{}", options.kind, cast.size, cast.position, crop.width, crop.height);
     let source = vec![
         "pipewiresrc".into(),
         format!("fd={}", cast.remote.as_raw_fd()),
