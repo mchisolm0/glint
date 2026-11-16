@@ -4,7 +4,7 @@ From building Glint (a CleanShot-style screenshot and recording app) on Exact `a
 and on Fedora 44 / GNOME 50 (Wayland). Not filed yet. Each issue links code only as a reference: the fork branch is
 what made Glint work, not a request to merge it.
 
-Fork: `mchisolm0/exact`, branch `glint` (link once pushed). Glint: `mchisolm0/glint` (link once pushed).
+Fork: [`mchisolm0/exact`, branch `glint`](https://github.com/mchisolm0/exact/tree/glint). Glint: [`mchisolm0/glint`](https://github.com/mchisolm0/glint).
 
 ---
 
