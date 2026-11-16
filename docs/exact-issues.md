@@ -3,44 +3,58 @@
 Found while building [Glint](https://github.com/mchisolm0/glint), a screenshot and recording app, on macOS 27 and
 Fedora 44 / GNOME 50. Every repro runs against upstream `main` at `f31d5ab8e`; they live in
 [`repros/`](https://github.com/mchisolm0/glint/tree/main/repros). Fixes we used are on
-[`mchisolm0/exact`, branch `glint`](https://github.com/mchisolm0/exact/tree/glint), as references, not merge requests.
-Not filed yet.
+[`mchisolm0/exact`, branch `glint`](https://github.com/mchisolm0/exact/tree/glint). Exact takes no pull requests, and
+CONTRIBUTING asks for a fix as a diff or in words in the issue, so each links its commit. Not filed yet.
+
+Seven issues, one question (8), and one comment on an existing issue (9).
 
 ---
 
-## 1. Canvas `drawImage` draws nothing for an `app:/` path
+## 1. Canvas `drawImage` draws nothing for an `app:/` path (tested diff)
+
+**Host:** Web, macOS
 
 `ctx.drawImage("app:/data/red.png", …)` draws nothing and logs nothing, while an `image` node shows the same file.
 Canvas image handles load assets and http(s) URLs only.
 
 - **Repro:** [`repros/1-canvas-app-image`](https://github.com/mchisolm0/glint/tree/main/repros/1-canvas-app-image).
   Write a red PNG with `captureCanvas`, then draw it: the canvas keeps its blue background (`#0000ff`), the `image`
-  node is red. Web and macOS.
-- **Fix we used:** `1a7cc5590` opens `app:/` paths in Apple's and the painted host's canvas image loaders. The web
-  host still fails: `host/web/canvas2d-glue.js` loads handles through `exact.assetURL`, not `appURL`.
+  node is red.
+- **Fix:** [`1a7cc5590`](https://github.com/mchisolm0/exact/commit/1a7cc5590) opens `app:/` paths in Apple's and the
+  painted host's canvas image loaders. The web host still fails: `host/web/canvas2d-glue.js` loads handles through
+  `exact.assetURL`, not `appURL`.
 - **Also seen in the same repro:** a record argument reaches `draw` as a positional array (`["app:/data/red.png"]`),
   not `{ path }`; a state-bound `bitmap-width` fails the JS build ("a dynamic canvas bitmap size or setting is not in
   the JS target").
 
 ---
 
-## 2. No way to move a native file into `app:/` storage
+## 2. A Rust source can't put a file over about 4.5 MB into `app:/` storage
 
-A Rust source that writes files (screen capture, recordings) can't get them into `app:/data`:
+**Host:** macOS (the storage path is shared)
+
+A Rust source that writes files (screen capture, recordings) can't get them into `app:/data`. In #230 the supported
+route for Rust app files was `Answer::Later(exact_data::storage::request(...))`, but that route carries the bytes as
+a JSON array under a 16 MiB cap (`runner/src/request.rs:15`), so a PNG over about 4.5 MB is refused and a recording
+is out of reach:
 
 | Request | Result |
 | --- | --- |
-| TS `copyFile` or `rename`, granted native path to `app:/data` | `filesystem: cannot mix app and native paths` |
+| Rust `fs.writeFile` of 5 MB | `storage request exceeds its byte limit` |
 | Rust `fs.copyFile`, native path to `app:/data` | `portable storage needs an app:/ path` (native paths are Windows only, `data/host/src/native.rs:531`) |
-| Rust `fs.writeFile` of 5 MB | `storage request exceeds its byte limit`: bytes travel as a JSON array under a 16 MiB cap (`runner/src/request.rs:15`), about 4.5 MB of PNG |
+| TS `copyFile` or `rename`, granted native path to `app:/data` | `filesystem: cannot mix app and native paths` |
 
 - **Repro:** [`repros/2-native-file-to-app-storage`](https://github.com/mchisolm0/glint/tree/main/repros/2-native-file-to-app-storage), headless with `exact agent macos`.
 - **Workaround:** `readFile` then `writeFile` through the JS heap.
-- **Ask:** let `copyFile`/`rename` move a granted native path into `app:/`, or give Rust sources a move request.
+- **Ask:** `copyFile` from a `doc:` file to `app:/` already has the host copy the bytes, past the 16 MiB result
+  (`docs/reference.md`, the `doc:` table). The same for a native path the app was granted, or a copy request for Rust
+  sources, would cover it.
 
 ---
 
 ## 3. `cargo check` in `data/` fails on macOS when the data crate links Swift
+
+**Host:** macOS
 
 If a data crate links a Swift library that uses Concurrency (as the `screencapturekit` crate does), `cargo check
 --workspace` in `data/`, which rust-analyzer runs, fails. The web shell's build script links the data crate at
@@ -50,11 +64,14 @@ Exact's own verbs set 14.0 and pass. `docs/reference.md` says `cargo` and rust-a
 - **Repro:** [`repros/3-swift-linked-data-crate`](https://github.com/mchisolm0/glint/tree/main/repros/3-swift-linked-data-crate):
   `bun exact.mjs web-build`, then `cd data && cargo check --workspace`.
 - **Workaround:** `MACOSX_DEPLOYMENT_TARGET = "14.0"` in `.cargo/config.toml` `[env]`. The next `web-build` or
-  `update` rewrites the app's copy, so it only sticks in the Exact checkout's (`afcc738ee`).
+  `update` rewrites the app's copy, so it only sticks in the Exact checkout's
+  ([`afcc738ee`](https://github.com/mchisolm0/exact/commit/afcc738ee)).
 
 ---
 
-## 4. Painted host: a canvas whose arguments alone change isn't repainted
+## 4. Painted host: a canvas whose arguments alone change isn't repainted (tested diff)
+
+**Host:** Linux, Windows, Android (the painted host)
 
 A commit that changes only a `canvas surface=`'s arguments moves no node, so no frame is painted until something
 else changes. Glint's arrow tool showed nothing while dragging, only on release. The Apple host already schedules a
@@ -63,12 +80,14 @@ frame on `canvas_owed`.
 - **Repro:** `cargo test -p exact-painted --lib a_canvas_whose_arguments_alone_change_is_painted_again`, from
   [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s patch. Fails with
   "the canvas owes a drawing".
-- **Fix we used:** `15897f15b` (the test passes with it): a commit sets `dirty` when a canvas is owed, and a redrawn
-  canvas counts as damage so a partial paint includes it.
+- **Fix:** [`15897f15b`](https://github.com/mchisolm0/exact/commit/15897f15b) (the test passes with it): a commit sets
+  `dirty` when a canvas is owed, and a redrawn canvas counts as damage so a partial paint includes it.
 
 ---
 
 ## 5. Painted host: `native.available` is true for an app with no native module
+
+**Host:** Linux, Windows, Android (the painted host)
 
 When the painted host serves any package, `handle_modules` installs a hosted handler on the native slot, and
 `door.rs` answers `available` from it. An app with no module of its own that checks `available` then sends calls
@@ -81,61 +100,72 @@ say `available` is false when the app links no module.
 
 ---
 
-## 6. Painted host: a dark `color-scheme` leaves the window ground and popovers light
+## 6. Painted host: under a dark `color-scheme` root, popovers and the window ground stay light
 
-With the system light, `color-scheme="dark"` on the root turns text light but the window's ground stays white
-(`[255, 255, 255]`) until the root paints `-exact-background`. A `popover` under that root also draws white unless
-it sets `color-scheme="dark"` itself.
+**Host:** Linux, Windows, Android (the painted host)
+
+With the system light and `color-scheme="dark"` on the root:
+
+- **A `popover`** under that root draws white unless it sets `color-scheme="dark"` itself.
+- **The window ground** stays white (`[255, 255, 255]`) while the text turns light, so the page reads as light text
+  on white until the root paints `-exact-background`. #10 calls the ground under a root with no background intended
+  ("the page is the platform's background"); the question is whether that background should follow the root's
+  scheme.
 
 - **Repro:** from [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s
-  patch: `cargo test -p exact-painted --lib a_dark_root_scheme_darkens_the_windows_ground` and
-  `cargo test -p exact-painted --test neutral_alert a_popover_under_a_dark_root_draws_dark`.
+  patch: `cargo test -p exact-painted --test neutral_alert a_popover_under_a_dark_root_draws_dark` and
+  `cargo test -p exact-painted --lib a_dark_root_scheme_darkens_the_windows_ground`.
 
 ---
 
-## 7. Linux: `image` draws nothing for a GIF, JPEG or WebP
+## 7. Linux: `image` draws nothing for a JPEG or GIF
 
-On Linux the painted host has no decoder for these: GIF and WebP headers go to the JPEG path, and on Linux
-`jpeg_decode::decode` (`host/painted/src/image/jpeg.rs:459`) always returns `DecodeFailed`. macOS uses ImageIO,
-Windows WIC, Android `AImageDecoder`. Only PNG draws, so a recording app on Linux can't preview a GIF.
+**Host:** Linux
+
+Every image but PNG goes to `jpeg_decode::decode`, which on Linux is a stub marked "No platform decoder on this
+target" (`host/painted/src/image/jpeg.rs:458`) and returns `DecodeFailed`. macOS uses ImageIO, Windows WIC, Android
+`AImageDecoder`. So on Linux a photo or a GIF recording shows nothing.
 
 - **Repro:** `cargo test -p exact-painted --lib a_gif_decodes_on_every_painted_host`, from
   [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s patch. Passes on
   macOS; on Fedora 44 it fails with `apps/motion-gallery/assets/spin.gif: Err(DecodeFailed)`.
+- **Ask:** a Rust decoder for JPEG and GIF on Linux. JPEG encoding there already uses `jpeg-encoder` because Linux has
+  no system encoder (`rules/DEFERRED.md`, #504). WebP matters less to us.
 
 ---
 
-## 8. Linux as a desktop target
+## 8. Question: is a Linux desktop host wanted?
 
-The Linux host draws to DRM/KMS, VNC or nothing, so a desktop app can't open a window on GNOME or KDE, and
-`@exact/global-shortcuts` and `@exact/clipboard` don't support Linux. Glint runs on GNOME 50 with these on the fork:
+Exact has no Discussions, and CONTRIBUTING lists a missing capability as issue material, so this goes as an issue
+asking, not proposing a merge.
 
-- **Window:** `1bb260aa9`, winit + softbuffer (as on Windows) as one more output for the event loop; Wayland and X11,
-  `dlopen`ed so the binary still links only libc. `2257f942b` makes the Wayland app id the app's id, so GNOME finds
-  the `.desktop` file.
-- **Global shortcuts and clipboard:** `7a57be573`, the GlobalShortcuts portal over the host's D-Bus code, and
-  `wl-copy`/`xclip`. GNOME refuses shortcuts without a `.desktop` file for the app id, and its dialog lists each
-  shortcut by id (`area`, `record`); a description would read better.
-- **`keepRunning`:** `bbf91a41a`. Closing destroys the window (winit can't hide one on Wayland), and a second launch
-  hands its activation token to the running one over a socket.
-
-Still missing: the window title (it's the binary's name, not `app.name`), `Icon=` in the desktop entry, following
-the system's dark mode, copying a file (`@exact/clipboard` copies PNGs and text only), and `@exact/text-detection`
-on Linux. Its call answers `NotAllowedError`, which reads like a missing grant rather than a missing platform.
+> **Host:** Linux
+>
+> `rules/DEFERRED.md` keeps `@exact/global-shortcuts`, `@exact/login-item` and `@exact/dock` off Linux "until a
+> desktop host". Is a desktop host (a normal window on GNOME or KDE) wanted before 1.0, and is there a shape you'd
+> want it in?
+>
+> For reference, Glint runs on GNOME 50 Wayland with these on our fork:
+>
+> - [`1bb260aa9`](https://github.com/mchisolm0/exact/commit/1bb260aa9): winit + softbuffer as one more output for
+>   the event loop, Wayland and X11, `dlopen`ed so the binary still links only libc.
+>   [`2257f942b`](https://github.com/mchisolm0/exact/commit/2257f942b) makes the Wayland app id the app's id, so GNOME
+>   finds the `.desktop` file.
+> - [`7a57be573`](https://github.com/mchisolm0/exact/commit/7a57be573): global shortcuts through the GlobalShortcuts
+>   portal, and the clipboard through `wl-copy`/`xclip`.
+> - [`bbf91a41a`](https://github.com/mchisolm0/exact/commit/bbf91a41a): `keepRunning`. winit can't hide a window on
+>   Wayland, so closing destroys it, and a second launch hands its activation token to the running one.
 
 ---
 
-## 9. Field report: a screenshot app on Exact
+## 9. Comment on #505 (still capture of the desktop)
 
-What Glint needed beyond the box. Related: #503.
-
-- **Worked as is:** `@exact/global-shortcuts`, the status item, `@exact/clipboard`, `@exact/text-detection`,
-  `@exact/login-item`, Canvas 2D with `captureCanvas`.
-- **Screen capture:** no package, so a Rust crate does it (ScreenCaptureKit on the Mac, the desktop portals and
-  GStreamer on Linux). A package that captures a display, area or window to an `app:/` PNG, and records to an
-  `app:/` MP4, would cover most of it.
-- **Windows Contract can't make:** a dimmed picker over every display, a floating thumbnail that doesn't take focus,
-  pinned images, a recording frame. All Swift today.
-- **Smaller things:** shapes aren't exported by name from `app.contract.d.ts`; `exactViewport().devicePixelRatio`
-  must be declared `option<number>`; `test macos` uses a 420 × 900 viewport, not app.json's window size, and a test
-  file can't set its own.
+> A third host's data point, from [Glint](https://github.com/mchisolm0/glint) on Fedora 44 / GNOME 50 (Wayland). A
+> Wayland app can't read the screen directly. Glint asks the Screenshot portal for a still, and the ScreenCast portal
+> for recording and scrolling capture, feeding `pipewiresrc` into GStreamer. GNOME asks about the still once (a
+> permission under Settings, Privacy and Security, Screenshots), which meets "no per-capture prompt"; a recording's
+> picker is skipped after the first by the portal's restore token. The code is
+> [`capture/src/linux.rs`](https://github.com/mchisolm0/glint/blob/main/capture/src/linux.rs).
+>
+> On "the result as a file or image handle, not bytes through the data source": our capture writes a PNG natively and
+> hits the same wall getting it into `app:/` (#N, issue 2 above).
