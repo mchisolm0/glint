@@ -50,10 +50,8 @@ Needs `wl-clipboard`, `xdg-desktop-portal-gnome`, and GStreamer with its PipeWir
 `x264enc`. The window is the UI; docs/design.md, "Linux notes", lists what the Mac has that Linux lacks.
 
 ```sh
-bun exact.mjs linux   # prints the binary and its desktop entry
-# Once: GNOME's shortcut portal needs a desktop entry for dev.mchisolm0.glint.
-cp target/host-dev/dev.mchisolm0.glint.desktop ~/.local/share/applications/
-target/host-dev/glint-linux
+bun exact.mjs linux
+scripts/install-linux.sh   # ~/.local/opt/glint, an app menu entry with the icon, and autostart at login
 ```
 
 The first launch asks to add the shortcuts (change them in Settings, Apps, Glint), the first capture to allow
