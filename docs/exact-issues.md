@@ -142,3 +142,9 @@ the global shortcuts all work. What got in the way:
   description field would read better there.
 - **SF symbols:** `symbol:sf/*` is blank on Linux and the build says so clearly. Declaring `icon.*` tokens with
   Material Symbols SVGs in `app.forma` fixed every one, including a computed `` `symbol:icon.${t}` ``.
+- **A canvas froze mid-drag on the painted host.** A commit that changed only a `canvas surface=`'s arguments (a
+  drag's end point) moved no node, so no frame was painted, and a partial paint left out a canvas whose drawing
+  changed. Glint's arrow showed only on release. Fixed on the branch (`15897f15b`): the commit asks for a frame when
+  `canvas_owed`, and a canvas drawn again is flow damage. The Apple host already schedules on `canvas_owed`.
+- **`keepRunning` on Linux.** Added on the branch (`bbf91a41a`): the close destroys the window (winit can't hide one
+  on Wayland), and a second launch hands its activation token to the running one over a socket in `XDG_RUNTIME_DIR`.
