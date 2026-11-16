@@ -72,7 +72,7 @@ shows no app the pointer or other windows, so the desktop's own pickers stand in
 | `captureArea` | An empty rect opens the desktop's screenshot UI and answers what the person picked there (area, window or screen). A non-empty rect (from a future overlay) takes the desktop and crops to it, in the picture's pixels |
 | `captureWindow` | The same screenshot UI; `id` is unused. The person picks Window in it |
 | `startRecording` | A ScreenCast portal session. The first recording shows the desktop's chooser (a display, or a window when no area is given); its restore token is kept in the staging folder (`/tmp/glint/screencast.token`), so later ones start without it until a reboot clears `/tmp`. An area is cropped from the chosen display. `clicks` is ignored |
-| `startRecording` `"scroll"` | Always shows the chooser (no restore token), since each one is likely a different window; pick the window to scroll. Start it with the shortcut from that window: GNOME gives focus back to it when the chooser closes, where the Scroll button leaves Glint's window on top. Frames come at up to 30 fps |
+| `startRecording` `"scroll"` | Always shows the chooser (no restore token), since each one is likely a different window, and it offers windows only: a whole display stitches only when nothing beside the scrolling part is on it. Pick the window to scroll. Start it with the shortcut from that window: GNOME gives focus back to it when the chooser closes, where the Scroll button leaves Glint's window on top. Frames come at up to 30 fps |
 | `stopRecording` | Ends the `gst-launch-1.0` child that encodes the PipeWire stream: EOS for MP4, so mp4mux writes its index |
 
 - A cancelled picker answers an error ending "was cancelled".

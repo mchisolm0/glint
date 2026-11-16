@@ -167,10 +167,9 @@ struct Cast {
     position: (i32, i32),
 }
 
-/// Asks the ScreenCast portal for one monitor (or, without an area, a monitor or a window), with the
-/// cursor drawn in when `cursor`. A token from the last recording restores its pick without the chooser;
-/// the new one is kept for the next.
-fn cast(cursor: bool, monitor_only: bool, token: Option<&Path>) -> Result<Cast> {
+/// Asks the ScreenCast portal for one of `sources`, with the cursor drawn in when `cursor`. A token from
+/// the last recording restores its pick without the chooser; the new one is kept for the next.
+fn cast(cursor: bool, sources: SourceType, token: Option<&Path>) -> Result<Cast> {
     let restore = token
         .and_then(|t| std::fs::read_to_string(t).ok())
         .map(|t| t.trim().to_owned())
@@ -181,10 +180,6 @@ fn cast(cursor: bool, monitor_only: bool, token: Option<&Path>) -> Result<Cast> 
         let cursor_mode = match cursor && modes.contains(CursorMode::EMBEDDED) {
             true => CursorMode::EMBEDDED,
             false => CursorMode::HIDDEN,
-        };
-        let sources = match monitor_only {
-            true => SourceType::MONITOR,
-            false => SourceType::MONITOR | SourceType::WINDOW,
         };
         let session = proxy.create_session(Default::default()).await?;
         let options = SelectSourcesOptions::default()
@@ -492,7 +487,14 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
     let token = to.with_file_name(TOKEN);
     // A scrolling capture asks every time, since each one is likely a different window.
     let scroll = options.kind == VideoKind::Scroll;
-    let cast = cast(options.cursor && !scroll, options.area.is_some(), (!scroll).then_some(token.as_path()))?;
+    // A scrolling capture is of one window: a whole display stitches only where nothing else on it moves
+    // or stays put beside the scrolling part, and the portal offers no area.
+    let sources = match (scroll, options.area) {
+        (true, _) => SourceType::WINDOW,
+        (false, Some(_)) => SourceType::MONITOR,
+        (false, None) => SourceType::MONITOR | SourceType::WINDOW,
+    };
+    let cast = cast(options.cursor && !scroll, sources, (!scroll).then_some(token.as_path()))?;
     let even = options.kind == VideoKind::Mp4;
     let crop = region(cast.size, cast.position, options.area, even).ok_or("the area is off the recorded screen")?;
     let source = vec![
