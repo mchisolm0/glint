@@ -213,7 +213,9 @@ fn offset(prev: &Frame, cur: &Frame, top: usize, rows: usize) -> Option<isize> {
         let (mut patterned, mut matched) = (0usize, 0usize);
         for i in 0.max(-d)..(rows as isize).min(rows as isize - d) {
             let (c, p) = (top + i as usize, top + (i + d) as usize);
-            if cur.plain[c] {
+            // At a move, a row that stayed where it was is no evidence: a fixed composer or panel inside
+            // the band, before the first scroll has found where the band ends.
+            if cur.plain[c] || (d != 0 && cur.hashes[c] == prev.hashes[c]) {
                 continue;
             }
             patterned += 1;
@@ -237,6 +239,53 @@ fn offset(prev: &Frame, cur: &Frame, top: usize, rows: usize) -> Option<isize> {
         }
     }
     best.map(|(_, _, d)| d)
+}
+
+/// The first scroll, before the band's edges are known: the move most of the changed rows in `[top, top +
+/// rows)` agree on, at least twice as many as on any other, and the band it shows (its top and rows). Parts
+/// that change without moving (an edge fading the content out, a translucent composer the content shows
+/// through, a pill floating over it) agree with no move, so the band is the run between them with the most
+/// rows that moved, widened by the rows the move brought in.
+fn first_move(prev: &Frame, cur: &Frame, top: usize, rows: usize) -> Option<(isize, usize, usize)> {
+    let span = top as isize..(top + rows) as isize;
+    let changed: Vec<usize> = (top..top + rows).filter(|&c| !cur.plain[c] && cur.hashes[c] != prev.hashes[c]).collect();
+    if changed.len() < EVIDENCE {
+        return None;
+    }
+    let shows = |c: usize, d: isize| {
+        let p = c as isize + d;
+        span.contains(&p).then(|| cur.hashes[c] == prev.hashes[p as usize])
+    };
+    let reach = rows as isize - (rows as f64 * OVERLAP).ceil() as isize;
+    let scores: Vec<(isize, usize)> =
+        (-reach..=reach).filter(|&d| d != 0).map(|d| (d, changed.iter().filter(|&&c| shows(c, d) == Some(true)).count())).collect();
+    let &(d, best) = scores.iter().max_by_key(|(d, n)| (*n, std::cmp::Reverse(d.abs())))?;
+    let runner = scores.iter().filter(|(e, _)| (e - d).abs() > 2).map(|(_, n)| *n).max().unwrap_or(0);
+    if best < EVIDENCE || best < 2 * runner || best * 4 < changed.len() {
+        return None;
+    }
+    // Runs between the changed rows that disagree with the move; the one with the most rows that moved.
+    let (mut run, mut most): ((Option<usize>, usize, usize), (Option<usize>, usize, usize)) = ((None, 0, 0), (None, 0, 0));
+    for c in top..top + rows {
+        let moved = match shows(c, d) {
+            _ if cur.plain[c] || cur.hashes[c] == prev.hashes[c] => continue,
+            Some(true) => true,
+            Some(false) => false,
+            None => continue,
+        };
+        if moved {
+            run = (run.0.or(Some(c)), c, run.2 + 1);
+            if run.2 > most.2 {
+                most = run;
+            }
+        } else {
+            run = (None, 0, 0);
+        }
+    }
+    let (Some(from), to, _) = most else { return None };
+    // The rows the move brought in are new, not moved: they edge the band on that side.
+    let (from, to) = ((from as isize + d.min(0)) as usize, (to as isize + d.max(0)) as usize);
+    (to + 1 - from >= EVIDENCE).then_some((d, from, to + 1 - from))
 }
 
 /// The picture so far: the fixed top and bottom rows (from the frames that reached furthest up and down)
@@ -272,20 +321,26 @@ impl Stitch {
         if rows < EVIDENCE {
             return;
         }
+        if self.edges.is_none() {
+            // Before the first scroll nothing is placed yet, so a frame that did not scroll (or changed some
+            // other way, as a window does gaining focus when the desktop's picker closes) is the new start.
+            let Some((d, top, rows)) = first_move(last, &cur, top, rows) else {
+                self.last = Some(cur);
+                return;
+            };
+            self.edges = Some((top, self.height - top - rows));
+            let first = self.last.take().expect("checked");
+            self.band = (top..top + rows).map(|i| first.row(i, self.width).to_vec()).collect();
+            self.head = first.rgba[..top * self.width * 4].to_vec();
+            self.foot = first.rgba[(top + rows) * self.width * 4..].to_vec();
+            self.place(&cur, d, top, rows);
+            self.last = Some(cur);
+            return;
+        }
         match offset(last, &cur, top, rows) {
-            // Before the first scroll nothing is placed yet, so a frame that changed some other way (the
-            // window gaining focus as the desktop's picker closes) is the new start.
-            None if self.edges.is_none() => self.last = Some(cur),
             None => {}
             Some(0) => self.last = Some(cur),
             Some(d) => {
-                if self.edges.is_none() {
-                    self.edges = Some((top, bottom));
-                    let first = self.last.take().expect("checked");
-                    self.band = (top..top + rows).map(|i| first.row(i, self.width).to_vec()).collect();
-                    self.head = first.rgba[..top * self.width * 4].to_vec();
-                    self.foot = first.rgba[(top + rows) * self.width * 4..].to_vec();
-                }
                 self.place(&cur, d, top, rows);
                 self.last = Some(cur);
             }
@@ -466,5 +521,68 @@ mod tests {
         assert_eq!((width, rows), (W, 10 + 70 + 84 + 6));
         assert_eq!(&rgba[10 * W * 4..11 * W * 4], &page[0][..]);
         assert_eq!(&rgba[(10 + 153) * W * 4..(10 + 154) * W * 4], &page[153][..]);
+    }
+
+    #[test]
+    fn a_fixed_composer_with_a_blinking_caret_is_a_fixed_edge() {
+        let (page, other) = (page(400), page(500));
+        // Ten rows of toolbar, the page, then a patterned 20-row composer whose caret rows blink.
+        let frame = |scroll: usize, blink: bool| -> Vec<u8> {
+            let mut out = view(&page, scroll, 80, 10, 0);
+            for y in 0..20 {
+                let mut row = other[300 + y].clone();
+                if blink && (6..10).contains(&y) {
+                    row[40..44].copy_from_slice(&[255, 0, 0, 255]);
+                }
+                out.extend(row);
+            }
+            out
+        };
+        let mut stitch = Stitch::new(W, 100);
+        for (scroll, blink) in [(0, false), (0, true), (20, false), (45, true), (70, false)] {
+            stitch.add(frame(scroll, blink));
+        }
+        let (rgba, rows) = stitch.finish().unwrap();
+        // The band is the 70 page rows between the toolbar and the composer.
+        assert_eq!(rows, 10 + 70 + 70 + 20);
+        assert_eq!(&rgba[10 * W * 4..11 * W * 4], &page[0][..]);
+        assert_eq!(&rgba[(10 + 139) * W * 4..(10 + 140) * W * 4], &page[139][..]);
+        assert_eq!(&rgba[(10 + 140) * W * 4..(10 + 141) * W * 4], &other[300][..]);
+    }
+
+    #[test]
+    fn fades_a_translucent_composer_and_a_floating_pill_are_left_out() {
+        let (page, other) = (page(400), page(500));
+        let dim = |row: &[u8]| -> Vec<u8> { row.chunks(4).flat_map(|p| [p[0] / 2, p[1] / 2, p[2] / 2, 255]).collect() };
+        // A toolbar, a faded edge, the page with a pill floating over its rows 70..74, another faded edge,
+        // then a composer the page shows through.
+        let frame = |scroll: usize| -> Vec<u8> {
+            let mut out = flat(90).repeat(4);
+            (4..8).for_each(|y| out.extend(dim(&page[scroll + y])));
+            for y in 8..76 {
+                let mut row = page[scroll + y].clone();
+                if (70..74).contains(&y) {
+                    row[80..160].copy_from_slice(&other[y][80..160]);
+                }
+                out.extend(row);
+            }
+            (76..80).for_each(|y| out.extend(dim(&page[scroll + y])));
+            for y in 80..100 {
+                let mut row = other[300 + y].clone();
+                row[..4].copy_from_slice(&[scroll as u8, 0, 0, 255]);
+                out.extend(row);
+            }
+            out
+        };
+        let mut stitch = Stitch::new(W, 100);
+        for scroll in [0, 0, 20, 45, 70] {
+            stitch.add(frame(scroll));
+        }
+        let (rgba, rows) = stitch.finish().unwrap();
+        // The band is rows 8..70, above the pill: the page down to row 70 + 62.
+        assert_eq!(rows, 8 + 132 + 30);
+        for k in [0, 61, 62, 131] {
+            assert_eq!(&rgba[(8 + k) * W * 4..(9 + k) * W * 4], &page[8 + k][..], "page row {k}");
+        }
     }
 }
