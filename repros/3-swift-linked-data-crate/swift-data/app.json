@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../exact-upstream/scripts/app.schema.json",
+  "name": "Swift Data",
+  "short_name": "Swift Data",
+  "id": "com.example.swiftdata",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.example.swiftdata",
+    "name": "Swift Data"
+  },
+  "host": {
+    "web": {}
+  },
+  "deploy": {
+    "store": {
+      "web": "0"
+    }
+  },
+  "rust": {
+    "data": {
+      "crate": "swift-data-data",
+      "type": "swift_data_data::SwiftData"
+    }
+  }
+}

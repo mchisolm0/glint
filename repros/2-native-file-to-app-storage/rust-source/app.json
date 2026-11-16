@@ -1,0 +1,34 @@
+{
+  "host": {
+    "web": {},
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 900,
+        "height": 700
+      }
+    }
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "macos": "0"
+    }
+  },
+  "$schema": "../../../exact-upstream/scripts/app.schema.json",
+  "name": "Rust Source",
+  "short_name": "Rust Source",
+  "id": "com.example.rust-source-705f8e",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.example.rust-source-705f8e",
+    "name": "Rust Source"
+  },
+  "rust": {
+    "data": {
+      "crate": "rust-source-data",
+      "type": "rust_source_data::RustSource"
+    }
+  }
+}

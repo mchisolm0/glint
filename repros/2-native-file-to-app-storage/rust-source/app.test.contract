@@ -1,0 +1,7 @@
+test "a Rust source copies a granted native file into app:/data"
+  clock data
+  expect text "copied" == "copyFile native -> app:/data: ok"
+
+test "a Rust source writes 5 MB into app:/data"
+  clock data
+  expect text "big" == "writeFile 5 MB as JSON bytes: ok"

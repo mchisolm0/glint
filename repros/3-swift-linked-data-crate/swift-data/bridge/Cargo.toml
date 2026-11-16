@@ -1,0 +1,10 @@
+# A Swift function that uses Swift Concurrency, compiled by build.rs and linked as a static library:
+# the same shape as the `screencapturekit` crate's Swift bridge.
+[package]
+name = "bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+workspace = "../.exact/shells"
+build = "build.rs"

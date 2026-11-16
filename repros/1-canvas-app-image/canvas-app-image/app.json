@@ -1,0 +1,28 @@
+{
+  "host": {
+    "web": {},
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 900,
+        "height": 700
+      }
+    }
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "macos": "0"
+    }
+  },
+  "$schema": "../../../exact-upstream/scripts/app.schema.json",
+  "name": "CanvasAppImage",
+  "short_name": "CanvasAppImage",
+  "id": "dev.mchisolm0.repro.canvasappimage",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "dev.mchisolm0.repro.canvasappimage",
+    "name": "CanvasAppImage"
+  }
+}

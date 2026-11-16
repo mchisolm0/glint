@@ -1,0 +1,10 @@
+// Shows each storage step's outcome; app.ts does the work.
+shape Probe
+  lines: string[]
+
+component CopyIntoApp
+  resource probe = probe() as shape Probe else empty()
+  view
+    column testId="root" padding=16
+      for line in probe.lines key=line
+        text line

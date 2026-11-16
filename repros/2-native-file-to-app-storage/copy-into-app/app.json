@@ -1,0 +1,28 @@
+{
+  "host": {
+    "web": {},
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 900,
+        "height": 700
+      }
+    }
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "macos": "0"
+    }
+  },
+  "$schema": "../../../exact-upstream/scripts/app.schema.json",
+  "name": "Copy Into App",
+  "short_name": "Copy Into App",
+  "id": "com.example.copy-into-app-979cb2",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.example.copy-into-app-979cb2",
+    "name": "Copy Into App"
+  }
+}

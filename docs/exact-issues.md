@@ -1,150 +1,141 @@
 # Draft issues for expo/exact
 
-From building Glint (a CleanShot-style screenshot and recording app) on Exact `a62c78c2e` (2026-11-14), on macOS 27
-and on Fedora 44 / GNOME 50 (Wayland). Not filed yet. Each issue links code only as a reference: the fork branch is
-what made Glint work, not a request to merge it.
-
-Fork: [`mchisolm0/exact`, branch `glint`](https://github.com/mchisolm0/exact/tree/glint). Glint: [`mchisolm0/glint`](https://github.com/mchisolm0/glint).
-
----
-
-## 1. Canvas 2D `drawImage` can't draw an `app:/` file
-
-### What happened
-Glint's editor draws a screenshot the app saved in `app:/data` onto a canvas, adds marks, and `captureCanvas`es the
-result. `drawImage("app:/data/captures/x.png", …)` draws nothing and logs nothing: an image handle is an asset or an
-http(s) URL only (`Canvas2DImage.load` on Apple, `host.rs`'s `take_canvas_image_requests` on the painted host). An
-`image` node shows the same path fine, and `captureCanvas` writes to `app:/`, so the annotate-a-file loop is one
-read short.
-
-### Fix we used
-One line per host: the canvas's byte reader opens `app:/` paths the way an `image` node does (`AppFiles.open` on Apple,
-`picker::open` on the painted host). Branch `glint`, commit `1a7cc5590`.
-
-### Also
-- A record in a surface's arguments arrives in `draw` as a positional array (`["arrow", "#ff3b30", 6, …]`), not the
-  object the shape's TypeScript type suggests. Saying so in the canvas docs, or passing objects, would save a
-  debugging session.
-- `bitmap-width` bound to state is refused for the JS target ("a dynamic canvas bitmap size … is not in the JS
-  target"). Glint exports through a second canvas sized `pixels / devicePixelRatio`, mounted only while saving.
+Found while building [Glint](https://github.com/mchisolm0/glint), a screenshot and recording app, on macOS 27 and
+Fedora 44 / GNOME 50. Every repro runs against upstream `main` at `f31d5ab8e`; they live in
+[`repros/`](https://github.com/mchisolm0/glint/tree/main/repros). Fixes we used are on
+[`mchisolm0/exact`, branch `glint`](https://github.com/mchisolm0/exact/tree/glint), as references, not merge requests.
+Not filed yet.
 
 ---
 
-## 2. A Rust source can't get a file it wrote into app storage
+## 1. Canvas `drawImage` draws nothing for an `app:/` path
 
-### What happened
-Glint's Rust sources capture with ScreenCaptureKit and the desktop portal, which write files. Getting them into
-`app:/data`:
-- Storage requests from Rust take `app:/` paths only (`portable storage needs an app:/ path`); native paths work on
-  Windows only.
-- Binary writes are a JSON array of numbers, under 16 MiB per request. A Retina PNG is ~8 MB of JSON; a recording is
-  far over.
-- From TypeScript, `copyFile(native, "app:/…")` answers `cannot mix app and native paths`, even with both granted.
+`ctx.drawImage("app:/data/red.png", …)` draws nothing and logs nothing, while an `image` node shows the same file.
+Canvas image handles load assets and http(s) URLs only.
 
-### Workaround
-Rust stages the file in `/tmp/glint`; on the Mac a Swift module renames it into `context.data` and calls `wrote`;
-elsewhere `app.ts` reads and writes it through the JS heap.
-
-### Ask
-Let `copyFile`/`rename` move a granted native path into `app:/`, or give Rust sources a raw-bytes or move request.
+- **Repro:** [`repros/1-canvas-app-image`](https://github.com/mchisolm0/glint/tree/main/repros/1-canvas-app-image).
+  Write a red PNG with `captureCanvas`, then draw it: the canvas keeps its blue background (`#0000ff`), the `image`
+  node is red. Web and macOS.
+- **Fix we used:** `1a7cc5590` opens `app:/` paths in Apple's and the painted host's canvas image loaders. The web
+  host still fails: `host/web/canvas2d-glue.js` loads handles through `exact.assetURL`, not `appURL`.
+- **Also seen in the same repro:** a record argument reaches `draw` as a positional array (`["app:/data/red.png"]`),
+  not `{ path }`; a state-bound `bitmap-width` fails the JS build ("a dynamic canvas bitmap size or setting is not in
+  the JS target").
 
 ---
 
-## 3. A data crate that links Swift breaks the web shell's build on macOS
+## 2. No way to move a native file into `app:/` storage
 
-### What happened
-`glint-capture` uses the `screencapturekit` crate, which links a Swift bridge. The web shell's build script links
-`glint-data` for the host to bake, at Rust's default macOS deployment target (11.0). There Swift Concurrency comes
-through `@rpath`, which a build script has none of: `dyld: Library not loaded: @rpath/libswift_Concurrency.dylib`.
-`exact mac` sets 14.0 and is fine. `update --without web` is refused, since the web host is the dev loop's.
+A Rust source that writes files (screen capture, recordings) can't get them into `app:/data`:
 
-### Fix we used
-`MACOSX_DEPLOYMENT_TARGET = "14.0"` in `.cargo/config.toml`'s `[env]` (commit `afcc738ee`).
+| Request | Result |
+| --- | --- |
+| TS `copyFile` or `rename`, granted native path to `app:/data` | `filesystem: cannot mix app and native paths` |
+| Rust `fs.copyFile`, native path to `app:/data` | `portable storage needs an app:/ path` (native paths are Windows only, `data/host/src/native.rs:531`) |
+| Rust `fs.writeFile` of 5 MB | `storage request exceeds its byte limit`: bytes travel as a JSON array under a 16 MiB cap (`runner/src/request.rs:15`), about 4.5 MB of PNG |
 
----
-
-## 4. Linux as a desktop: a window, global shortcuts, the clipboard
-
-### What happened
-The Linux host draws to DRM/KMS, VNC or nothing, so a desktop utility can't run on GNOME or KDE (`QUEUE.md`, "Linux
-host": Wayland/X11 windows). `@exact/global-shortcuts` and `@exact/clipboard` list Linux as unsupported.
-
-### What we tried, as a reference
-- **A window** (commit `1bb260aa9`, ~720 lines in `host/linux/src/display/window.rs`): winit 0.30 + softbuffer, the
-  pair the Windows host uses, as one more `Output` for `event_loop::run`. Wayland and X11, client-side decorations on
-  GNOME, xkbcommon keymaps (a German layout and a dead key tested), wheel, fractional scale, resize, close. Frames
-  wait for the compositor's frame callback as a page flip paces KMS. Libraries are `dlopen`ed, so the binary still
-  links only libc. Tested in a private headless `gnome-shell` with frames read through mutter's ScreenCast.
-- **Global shortcuts** (commit `7a57be573`): the GlobalShortcuts portal over the host's existing D-Bus code. GNOME
-  needs a `.desktop` file for the app id, or it refuses ("An app id is required"); the Linux build could install one.
-- **Clipboard:** `wl-copy`, `xclip` under X11 only.
-
-### Still missing for desktop apps
-app.json's window size on Linux, tray/status items, input methods checked with IBus, drag and drop, notifications,
-multiple windows, layer-shell overlays, theme following the system, accessibility, a `.desktop` file and icon, GPU
-presentation.
-
-### Found on the way
-- `ime_target()` becomes `None` when the mouse is released over a focused field, so an input method stays off there
-  (the shared presenter; affects Windows too).
-- A package can't depend on crates of its own, so the portal service lives in `exact_painted`.
+- **Repro:** [`repros/2-native-file-to-app-storage`](https://github.com/mchisolm0/glint/tree/main/repros/2-native-file-to-app-storage), headless with `exact agent macos`.
+- **Workaround:** `readFile` then `writeFile` through the JS heap.
+- **Ask:** let `copyFile`/`rename` move a granted native path into `app:/`, or give Rust sources a move request.
 
 ---
 
-## 5. Field report: what a screenshot tool needed beyond the box
+## 3. `cargo check` in `data/` fails on macOS when the data crate links Swift
 
-Glint: Hyper+3 screen, +4 area or window, +2 the focused window, +5 record, +1 scrolling capture, +T text (OCR); a quick-access thumbnail, pins, an annotation
-editor (arrow, box, ellipse, line, pen, highlighter, text, pixelate, steps, spotlight, crop, background), MP4 and
-GIF recording. One Contract file, ~300 lines of `app.ts`, a Rust capture crate, a Swift module for the Mac's windows.
+If a data crate links a Swift library that uses Concurrency (as the `screencapturekit` crate does), `cargo check
+--workspace` in `data/`, which rust-analyzer runs, fails. The web shell's build script links the data crate at
+Rust's default deployment target (11.0), so dyld looks for `@rpath/libswift_Concurrency.dylib` and finds none.
+Exact's own verbs set 14.0 and pass. `docs/reference.md` says `cargo` and rust-analyzer work in `data/`.
 
-- **Worked out of the box:** `@exact/global-shortcuts`, the status item, `@exact/clipboard`, `@exact/text-detection`,
-  `@exact/login-item`, Canvas 2D and `captureCanvas`, `task … key=` for reacting to a native module's `changed`.
-- **Screen capture:** no package. A Rust crate behind Rust sources: ScreenCaptureKit on the Mac (`screencapturekit`
-  crate; macOS 26's screenshot API for window shadows) and the Screenshot/ScreenCast portals on Linux, with
-  GStreamer for encoding. A `@exact/screen-capture` package (display, area, window to an `app:/` PNG; a recording to
-  an `app:/` MP4) would cover most of it.
-- **Windows Contract can't make:** a dimmed picker over every display, a non-activating floating thumbnail, pins, a
-  recording frame. All Swift. A host-drawn overlay or panel primitive would let the next capture app skip it.
-- **Types:** shapes aren't exported by name from `app.contract.d.ts`; Glint derives `Mark` from `Args<'saveEdit'>`.
-- **`exactViewport().devicePixelRatio`** must be declared `option<number>`, or the bake refuses the shape.
-- **`test macos`** drives a 420 × 900 viewport, not app.json's window size, so a desktop layout's drags leave the
-  viewport until `--size 1100x760` is passed. A test file can't say its own size.
-- **`exact lock`** hit the same bitflags conflict twice after dependency changes; deleting `Cargo.lock` and locking
-  again fixed it both times.
-
-Related: #503 (a screenshot annotation tool on Windows).
+- **Repro:** [`repros/3-swift-linked-data-crate`](https://github.com/mchisolm0/glint/tree/main/repros/3-swift-linked-data-crate):
+  `bun exact.mjs web-build`, then `cd data && cargo check --workspace`.
+- **Workaround:** `MACOSX_DEPLOYMENT_TARGET = "14.0"` in `.cargo/config.toml` `[env]`. The next `web-build` or
+  `update` rewrites the app's copy, so it only sticks in the Exact checkout's (`afcc738ee`).
 
 ---
 
-## 6. Running Glint end to end on GNOME 50 (Wayland)
+## 4. Painted host: a canvas whose arguments alone change isn't repainted
 
-From a private headless GNOME 50 session on Fedora 44 (`glint` branch `0bcaaed72` plus the fix below). Screen, area
-and window capture, the clipboard, the editor and save, MP4 and GIF recording with the ScreenCast restore token, and
-the global shortcuts all work. What got in the way:
+A commit that changes only a `canvas surface=`'s arguments moves no node, so no frame is painted until something
+else changes. Glint's arrow tool showed nothing while dragging, only on release. The Apple host already schedules a
+frame on `canvas_owed`.
 
-- **`native.available` is true on Linux with no app module.** The painted host installs a hosted handler for its
-  packages (`presenter/requests.rs` `handle_modules`), and `door.rs` answers `available` from `state.hosted`, so app
-  code that gates its own module on `available` sends it calls that fail (`later`: `NotSupportedError`; `call`: "the
-  app's module answers no native.call"). Glint's file moves silently went nowhere. Glint now asks the module once with
-  a `call`. `available` meaning "a module answers the app's calls" would match the docs.
-- **The window's app id was the binary's name** (`glint`), so GNOME matched no desktop entry (generic icon, no app
-  name). Fixed on the branch: the Wayland app id and X11 class are the app's id (`host/linux/src/display/window.rs`).
-  The title is still the binary's stem (`glint`), not `app.name`, and the desktop entry has no `Icon=`.
-- **Dark mode:** `userInterfaceStyle` is Apple and web only (documented). `color-scheme="dark"` on the root turns the
-  text light but leaves the window's ground white until the root paints `-exact-background`, and a `popover` under
-  that root still draws light until it says `color-scheme="dark"` itself.
-- **Media:** an `image` of a GIF draws nothing and `video` is a blank box (no decoder on the painted host). A recording
-  app on Linux shows no preview.
-- **Packages on Linux:** `@exact/clipboard` copies PNGs and text only (no file, so no way to copy an MP4);
-  `@exact/text-detection` has no Linux implementation (Glint's call answered `NotAllowedError`, which reads like a
-  grant problem rather than a missing platform).
-- **GlobalShortcuts:** GNOME's "Add Keyboard Shortcuts" dialog lists each shortcut by its id (`area`, `record`); a
-  description field would read better there.
-- **SF symbols:** `symbol:sf/*` is blank on Linux and the build says so clearly. Declaring `icon.*` tokens with
-  Material Symbols SVGs in `app.forma` fixed every one, including a computed `` `symbol:icon.${t}` ``.
-- **A canvas froze mid-drag on the painted host.** A commit that changed only a `canvas surface=`'s arguments (a
-  drag's end point) moved no node, so no frame was painted, and a partial paint left out a canvas whose drawing
-  changed. Glint's arrow showed only on release. Fixed on the branch (`15897f15b`): the commit asks for a frame when
-  `canvas_owed`, and a canvas drawn again is flow damage. The Apple host already schedules on `canvas_owed`.
-- **`keepRunning` on Linux.** Added on the branch (`bbf91a41a`): the close destroys the window (winit can't hide one
-  on Wayland), and a second launch hands its activation token to the running one over a socket in `XDG_RUNTIME_DIR`.
+- **Repro:** `cargo test -p exact-painted --lib a_canvas_whose_arguments_alone_change_is_painted_again`, from
+  [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s patch. Fails with
+  "the canvas owes a drawing".
+- **Fix we used:** `15897f15b` (the test passes with it): a commit sets `dirty` when a canvas is owed, and a redrawn
+  canvas counts as damage so a partial paint includes it.
+
+---
+
+## 5. Painted host: `native.available` is true for an app with no native module
+
+When the painted host serves any package, `handle_modules` installs a hosted handler on the native slot, and
+`door.rs` answers `available` from it. An app with no module of its own that checks `available` then sends calls
+that fail: `call` answers "the app's module answers no native.call", `later` answers `NotSupportedError`. The docs
+say `available` is false when the app links no module.
+
+- **Repro:** two tests in [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s
+  patch: `cargo test -p exact-painted --lib a_package_handler_does_not_stand_for_the_apps_own_module` and
+  `cargo test -p exact-js --test it a_hosts_package_handler_is_not_the_apps_module`.
+
+---
+
+## 6. Painted host: a dark `color-scheme` leaves the window ground and popovers light
+
+With the system light, `color-scheme="dark"` on the root turns text light but the window's ground stays white
+(`[255, 255, 255]`) until the root paints `-exact-background`. A `popover` under that root also draws white unless
+it sets `color-scheme="dark"` itself.
+
+- **Repro:** from [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s
+  patch: `cargo test -p exact-painted --lib a_dark_root_scheme_darkens_the_windows_ground` and
+  `cargo test -p exact-painted --test neutral_alert a_popover_under_a_dark_root_draws_dark`.
+
+---
+
+## 7. Linux: `image` draws nothing for a GIF, JPEG or WebP
+
+On Linux the painted host has no decoder for these: GIF and WebP headers go to the JPEG path, and on Linux
+`jpeg_decode::decode` (`host/painted/src/image/jpeg.rs:459`) always returns `DecodeFailed`. macOS uses ImageIO,
+Windows WIC, Android `AImageDecoder`. Only PNG draws, so a recording app on Linux can't preview a GIF.
+
+- **Repro:** `cargo test -p exact-painted --lib a_gif_decodes_on_every_painted_host`, from
+  [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s patch. Passes on
+  macOS; on Fedora 44 it fails with `apps/motion-gallery/assets/spin.gif: Err(DecodeFailed)`.
+
+---
+
+## 8. Linux as a desktop target
+
+The Linux host draws to DRM/KMS, VNC or nothing, so a desktop app can't open a window on GNOME or KDE, and
+`@exact/global-shortcuts` and `@exact/clipboard` don't support Linux. Glint runs on GNOME 50 with these on the fork:
+
+- **Window:** `1bb260aa9`, winit + softbuffer (as on Windows) as one more output for the event loop; Wayland and X11,
+  `dlopen`ed so the binary still links only libc. `2257f942b` makes the Wayland app id the app's id, so GNOME finds
+  the `.desktop` file.
+- **Global shortcuts and clipboard:** `7a57be573`, the GlobalShortcuts portal over the host's D-Bus code, and
+  `wl-copy`/`xclip`. GNOME refuses shortcuts without a `.desktop` file for the app id, and its dialog lists each
+  shortcut by id (`area`, `record`); a description would read better.
+- **`keepRunning`:** `bbf91a41a`. Closing destroys the window (winit can't hide one on Wayland), and a second launch
+  hands its activation token to the running one over a socket.
+
+Still missing: the window title (it's the binary's name, not `app.name`), `Icon=` in the desktop entry, following
+the system's dark mode, copying a file (`@exact/clipboard` copies PNGs and text only), and `@exact/text-detection`
+on Linux. Its call answers `NotAllowedError`, which reads like a missing grant rather than a missing platform.
+
+---
+
+## 9. Field report: a screenshot app on Exact
+
+What Glint needed beyond the box. Related: #503.
+
+- **Worked as is:** `@exact/global-shortcuts`, the status item, `@exact/clipboard`, `@exact/text-detection`,
+  `@exact/login-item`, Canvas 2D with `captureCanvas`.
+- **Screen capture:** no package, so a Rust crate does it (ScreenCaptureKit on the Mac, the desktop portals and
+  GStreamer on Linux). A package that captures a display, area or window to an `app:/` PNG, and records to an
+  `app:/` MP4, would cover most of it.
+- **Windows Contract can't make:** a dimmed picker over every display, a floating thumbnail that doesn't take focus,
+  pinned images, a recording frame. All Swift today.
+- **Smaller things:** shapes aren't exported by name from `app.contract.d.ts`; `exactViewport().devicePixelRatio`
+  must be declared `option<number>`; `test macos` uses a 420 × 900 viewport, not app.json's window size, and a test
+  file can't set its own.

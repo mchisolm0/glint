@@ -1,0 +1,3 @@
+test "copyFile moves a granted native file into app:/data"
+  clock data
+  expect state probe.lines.3 == "copyFile native -> app:/data: ok"

@@ -1,0 +1,13 @@
+// Each line is one storage request a Rust source sends; data/src/lib.rs does the work.
+shape Line
+  text: string
+
+component RustSource
+  resource copied = copyNative() as shape Line
+  resource small = writeBytes(1000000) as shape Line
+  resource big = writeBytes(5000000) as shape Line
+  view
+    column testId="root" padding=16
+      text `copyFile native -> app:/data: ${copied.text}` testId="copied"
+      text `writeFile 1 MB as JSON bytes: ${small.text}` testId="small"
+      text `writeFile 5 MB as JSON bytes: ${big.text}` testId="big"

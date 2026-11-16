@@ -1,0 +1,6 @@
+// "Also": a canvas whose bitmap-width is bound to state is refused for the JS (web) target.
+component BitmapCheck
+  state bw = 10
+  view
+    main testId="root"
+      canvas surface=dot() width=10 height=10 bitmap-width=bw testId="dot"

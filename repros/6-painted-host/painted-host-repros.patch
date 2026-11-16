@@ -1,0 +1,220 @@
+diff --git a/host/painted/src/desktop_tests.rs b/host/painted/src/desktop_tests.rs
+index a6db5bcb6..7ea624eee 100644
+--- a/host/painted/src/desktop_tests.rs
++++ b/host/painted/src/desktop_tests.rs
+@@ -344,3 +344,33 @@ fn a_full_screen_display_is_the_viewport_and_tells_its_watchers_of_a_resize() {
+     surface((800., 600.), 2., None);
+     assert_eq!(told.load(std::sync::atomic::Ordering::Relaxed), 1);
+ }
++
++/// An app that links no module of its own and composes one package: the
++/// painted host fills the native slot's hosted app module for the package's
++/// calls, and exact-js answers `native.available` from that slot
++/// (`js/src/door.rs`), so the app is told it has a module whose every call is
++/// refused.
++#[test]
++fn a_package_handler_does_not_stand_for_the_apps_own_module() {
++    crate::desktop::install(Rc::new(Fake::default()));
++    let plan = crate::test_plan("component App\n  view\n    text \"Hi\"\n");
++    let (mut p, _) = Presenter::boot_with(
++        &plan,
++        Nothing,
++        (400., 800.),
++        1.,
++        std::path::PathBuf::new(),
++        PainterChoice::Cpu,
++    )
++    .unwrap();
++    p.serve_packages(vec![Entry::of::<global_shortcuts::GlobalShortcuts>(
++        "global-shortcuts",
++    )]);
++    // What `native.later({value})` sends: no package's extension.
++    let refused = call(&mut p, json!({"value": "x"}));
++    assert!(
++        !p.host().runner().native_slot().hosted(),
++        "the slot holds a hosted app module, so native.available is true, \
++         and the app's own call answers {refused}"
++    );
++}
+diff --git a/host/painted/src/image/decode_tests.rs b/host/painted/src/image/decode_tests.rs
+index 384a88d08..69b38cf4f 100644
+--- a/host/painted/src/image/decode_tests.rs
++++ b/host/painted/src/image/decode_tests.rs
+@@ -697,3 +697,23 @@ fn a_part_is_the_whole_decodes_pixels() {
+         "a part of a part"
+     );
+ }
++
++/// An `image` of a GIF (and of a JPEG or WebP, which share its path) draws
++/// on every painted host. Linux has no decoder behind `jpeg_decode::decode`
++/// (`#[cfg(not(any(android, windows, macos)))]` refuses every one), so this
++/// passes on macOS and Windows and fails on Linux.
++#[test]
++fn a_gif_decodes_on_every_painted_host() {
++    for path in [
++        "apps/motion-gallery/assets/spin.gif",
++        "apps/shared-elements/assets/alpine-water.jpg",
++    ] {
++        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
++        let bytes = std::fs::read(root.join(path)).unwrap();
++        let header = inspect(&mut Cursor::new(&bytes), bytes.len() as u64).unwrap();
++        let natural = header.metadata.natural;
++        let plan = DecodePlan::new(header, (natural.width, natural.height)).unwrap();
++        let decoded = decode_rows(Cursor::new(&bytes), &plan, || false);
++        assert!(decoded.is_ok(), "{path}: {decoded:?}");
++    }
++}
+diff --git a/host/painted/src/presenter/status_bar_tests.rs b/host/painted/src/presenter/status_bar_tests.rs
+index 204973dbf..15f6ba510 100644
+--- a/host/painted/src/presenter/status_bar_tests.rs
++++ b/host/painted/src/presenter/status_bar_tests.rs
+@@ -691,3 +691,31 @@ fn bound_hiding_follows_state() {
+     p.tap(flip).unwrap();
+     hidden(&p, false, Some("toy"));
+ }
++
++/// The page's ground at a point no node paints, and whether it reads dark.
++fn ground(p: &mut Presenter<()>, x: u32, y: u32) -> ([u8; 3], bool) {
++    let px = p.frame().pixel(x, y).unwrap().demultiply();
++    let rgb = [px.red(), px.green(), px.blue()];
++    (rgb, rgb.iter().all(|&c| c < 96))
++}
++
++/// `color-scheme="dark"` on the root, under a light system: the text turns
++/// light, so the ground under it is dark too, as it is once the root paints
++/// `-exact-background`.
++#[test]
++fn a_dark_root_scheme_darkens_the_windows_ground() {
++    let page = |background: &str| {
++        let mut p = source(&format!(
++            "component App\n  view\n    main color-scheme=\"dark\" {background}width=400 height=300\n      text \"Hi\"\n"
++        ));
++        p.set_system_scheme(false);
++        ground(&mut p, 300, 200)
++    };
++    let (painted, dark) = page("background-color=\"-exact-background\" ");
++    assert!(dark, "painting -exact-background: {painted:?}");
++    let (rgb, dark) = page("");
++    assert!(
++        dark,
++        "the ground under a dark root is {rgb:?} (painting -exact-background: {painted:?})"
++    );
++}
+diff --git a/host/painted/src/surfaces/capture_tests.rs b/host/painted/src/surfaces/capture_tests.rs
+index cc26f8c49..44073960e 100644
+--- a/host/painted/src/surfaces/capture_tests.rs
++++ b/host/painted/src/surfaces/capture_tests.rs
+@@ -394,3 +394,29 @@ fn a_rejected_capture_draw_preserves_the_file_and_stops_framing() {
+     assert_eq!(std::fs::read(path).unwrap(), b"keep");
+     cleanup(&mut p);
+ }
++#[test]
++fn a_canvas_whose_arguments_alone_change_is_painted_again() {
++    // The press moves no node: only the canvas's argument changes, as a drag's
++    // end point does while a mark is drawn.
++    const RECOLOR: &str = r#"component App
++  state shade = 40
++  action recolor
++    shade = 41
++  view
++    column
++      canvas surface=ink(shade) width=40 height=40
++      button press=recolor testId="recolor"
++        text "Recolor"
++"#;
++    let mut p = boot_source("recolor", RECOLOR);
++    let frame = p.display_frame().unwrap();
++    assert_eq!(frame.pixels().pixel(20, 20).unwrap().red(), 255);
++    assert!(p.display_complete(&frame));
++    assert!(!p.dirty());
++    press(&mut p, "recolor");
++    assert!(p.dirty(), "the canvas owes a drawing");
++    let frame = p.display_frame().unwrap();
++    let px = frame.pixels().pixel(20, 20).unwrap();
++    assert_eq!((px.red(), px.blue()), (0, 255), "the new drawing is shown");
++    cleanup(&mut p);
++}
+diff --git a/host/painted/tests/neutral_alert/popover.rs b/host/painted/tests/neutral_alert/popover.rs
+index 02a1e6028..5f94b6944 100644
+--- a/host/painted/tests/neutral_alert/popover.rs
++++ b/host/painted/tests/neutral_alert/popover.rs
+@@ -95,3 +95,38 @@ fn popover_pixels_and_pointer_input_use_the_padded_content_box() {
+         Some(&exact_runner::Value::Number(1.))
+     );
+ }
++
++/// A popover under a dark root, the root's ground painted, the system light:
++/// the popover inherits the root's `color-scheme` and draws dark, with no
++/// `color-scheme="dark"` of its own. `SCHEME` is the popover's own word.
++const DARK_ROOT: &str = r##"component App
++  view
++    main color-scheme="dark" background-color="-exact-background" width="100%" height="100%"
++      button "Open" popovertarget="menu" testId="open" width=80 height=32
++      column id="menu" popover="auto" role="dialog" width=200 height=100 testId="menu" SCHEME
++        text "In"
++"##;
++
++fn popover_surface(scheme: &str) -> [u8; 3] {
++    setup();
++    let mut p = boot(&DARK_ROOT.replace("SCHEME", scheme), 480.);
++    p.set_system_scheme(false);
++    p.tap(id(&p, "open")).unwrap();
++    p.run_commands(|| ());
++    let (x, y, w, h) = p.rect_of(id(&p, "menu")).unwrap();
++    let c = (p.frame().pixel((x + w - 20.) as u32, (y + h / 2.) as u32))
++        .unwrap()
++        .demultiply();
++    [c.red(), c.green(), c.blue()]
++}
++
++#[test]
++fn a_popover_under_a_dark_root_draws_dark() {
++    let said = popover_surface("color-scheme=\"dark\"");
++    assert!(said.iter().all(|&c| c < 96), "saying it is dark: {said:?}");
++    let inherited = popover_surface("");
++    assert!(
++        inherited.iter().all(|&c| c < 96),
++        "inheriting the root's dark scheme: {inherited:?} (saying it: {said:?})"
++    );
++}
+diff --git a/js/tests/it/native_later.rs b/js/tests/it/native_later.rs
+index 96430eb59..f011d5c2e 100644
+--- a/js/tests/it/native_later.rs
++++ b/js/tests/it/native_later.rs
+@@ -208,3 +208,36 @@ fn native_calls_receive_the_modules_numbers_exactly() {
+         assert_eq!(later, expected, "native.later of {n:e}");
+     }
+ }
++
++/// The painted host fills the slot's hosted handler for its own packages
++/// (`presenter/requests.rs` `handle_modules`) and refuses any other call
++/// `NotSupportedError`. That handler is not the app's module: an app that
++/// links none is told `native.available` is false, and its source falls back.
++#[test]
++fn a_hosts_package_handler_is_not_the_apps_module() {
++    let root = Root::new();
++    let mut m = root.module();
++    let mut s = Store::new(GRANTS, Vec::<(String, Vec<u8>)>::new());
++    m.native()
++        .expect("a module offers its native handle")
++        .host(Some(std::sync::Arc::new(|_, reply: exact_runner::Reply| {
++            reply.send(exact_runner::Outcome::Response(exact_runner::Response {
++                status: 200,
++                headers: Vec::new(),
++                body: br#"{"error":"NotSupportedError"}"#.to_vec(),
++            }))
++        })));
++    m.activate().unwrap();
++    // `native.call` behind `if (!native?.available)`.
++    let a = args("native", "x");
++    let answer = m.answer(&mut s, "work", &a).unwrap();
++    assert_eq!(finish(&mut m, &mut s, &a, answer), "no native module");
++    // `native.later` behind the same gate.
++    let a = args("later", "x");
++    let answer = m.answer(&mut s, "work", &a).unwrap();
++    assert!(
++        matches!(answer, Answer::Now(_)),
++        "native.available was true, so the call left for the host: {answer:?}"
++    );
++    assert_eq!(finish(&mut m, &mut s, &a, answer), "no native module");
++}

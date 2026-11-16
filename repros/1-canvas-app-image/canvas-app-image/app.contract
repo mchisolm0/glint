@@ -1,0 +1,23 @@
+// Repro: Canvas 2D drawImage of an app:/ file draws nothing, while an image node shows it.
+// "write" captures the red canvas into app:/data/red.png; then the second canvas
+// drawImage()s that path and the image node shows it.
+shape Written
+  path: string
+
+component CanvasAppImage
+  mutation written as shape Written
+  action write
+    send written = writeRed()
+  view
+    main testId="root" background-color="#ffffff" padding=16 display="flex" flex-direction="column" gap=8
+      button press=write testId="write"
+        text "Write"
+      row gap=8
+        canvas surface=red() width=100 height=100 testId="red"
+        match written
+          case some(w)
+            canvas surface=show(w.path) width=100 height=100 background-color="#0000ff" testId="canvas"
+            image w.path width=100 height=100 testId="image"
+            canvas surface=record(w) width=10 height=10 testId="record"
+          case none
+            box width=100 height=100

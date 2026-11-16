@@ -1,0 +1,11 @@
+{
+  "$schema": "../../../exact-upstream/scripts/app.schema.json",
+  "name": "BitmapCheck",
+  "short_name": "BitmapCheck",
+  "id": "dev.mchisolm0.repro.bitmapcheck",
+  "start_url": "/",
+  "display": "standalone",
+  "app": { "id": "dev.mchisolm0.repro.bitmapcheck", "name": "BitmapCheck" },
+  "host": { "web": {} },
+  "deploy": { "store": { "web": "0" } }
+}
