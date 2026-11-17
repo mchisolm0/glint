@@ -11,10 +11,12 @@ Three layers, so everything but the platform's windows is shared:
 ## A capture's path
 
 1. A shortcut, the menu bar item or a button sends a Rust source (`captureScreen`, `captureArea`, `captureWindow`,
-   `stopRecording`). Rust writes the file to a staging folder (`/private/tmp/glint` on macOS, `/tmp/glint` on Linux)
-   and answers `Staged`.
-2. `app.ts` `keepCapture` moves it into `app:/data/captures`: on the Mac the Swift module's `adopt` renames the file
-   (no bytes through JavaScript); elsewhere it reads and writes it.
+   `stopRecording`). Rust writes the file under its library name and answers `Staged`: on macOS to a staging folder
+   (`/private/tmp/glint`), on Linux to the folder the person chose (asked on the first capture, changed in Settings,
+   kept across launches by `doc.keep`).
+2. `app.ts` `keepCapture` brings it into `app:/data/captures`: on the Mac the Swift module's `adopt` renames the file;
+   on Linux the host copies it from the chosen `doc:` folder, which keeps its copy. Neither passes bytes through
+   JavaScript, whose `readFile` stops near 12 MiB.
 3. The view lists it, copies it, and the Swift module shows the quick-access panel.
 
 ## Names in `app:/data/captures`
@@ -71,7 +73,7 @@ shows no app the pointer or other windows, so the desktop's own pickers stand in
 | `captureScreen` | The whole desktop, every display, from the Screenshot portal without a picker. The first one asks the person to allow screenshots (GNOME: "Allow Apps to Take Screenshots?"); a refusal is kept and every later call fails until it is changed in Settings, Privacy and Security |
 | `captureArea` | An empty rect opens the desktop's screenshot UI and answers what the person picked there (area, window or screen). A non-empty rect (from a future overlay) takes the desktop and crops to it, in the picture's pixels |
 | `captureWindow` | The same screenshot UI; `id` is unused. The person picks Window in it |
-| `startRecording` | A ScreenCast portal session. The first recording shows the desktop's chooser (a display, or a window when no area is given); its restore token is kept in the staging folder (`/tmp/glint/screencast.token`), so later ones start without it until a reboot clears `/tmp`. An area is cropped from the chosen display. `clicks` is ignored |
+| `startRecording` | A ScreenCast portal session. The first recording shows the desktop's chooser (a display, or a window when no area is given); its restore token is kept in `$XDG_STATE_HOME/glint/screencast.token`, so later ones start without it. An area is cropped from the chosen display. `clicks` is ignored |
 | `startRecording` `"scroll"` | Always shows the chooser (no restore token), since each one is likely a different window, and it offers windows only: a whole display stitches only when nothing beside the scrolling part is on it. Pick the window to scroll. Start it with the shortcut from that window: GNOME gives focus back to it when the chooser closes, where the Scroll button leaves Glint's window on top. Frames come at up to 30 fps |
 | `stopRecording` | Ends the `gst-launch-1.0` child that encodes the PipeWire stream: EOS for MP4, so mp4mux writes its index |
 
