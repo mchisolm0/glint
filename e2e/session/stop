@@ -15,9 +15,31 @@ ours() {
   done
 }
 
-rm -f "$STATE/hypr/env"
 pids=$(ours)
 [ -z "$pids" ] && { echo "session not running"; rm -f "$XDG_RUNTIME_DIR/bus" "$XDG_RUNTIME_DIR/glint-drive.sock"; exit 0; }
+
+# Torn down in order, since anything that loses its compositor or bus mid-shutdown can crash and dump core,
+# which Hyprland reports on the real desktop: first the clients (Glint, portals, the driver), then each
+# compositor alone, nested Hyprland before the gnome-shell it draws in, as each stops its own Xwayland, then
+# the buses and PipeWire. `named` lists ours by process name; `except` drops those.
+named() {
+  for pid in $(ours); do
+    comm=$(cat /proc/"$pid"/comm 2>/dev/null) || continue
+    case " $2 " in *" $comm "*) [ "$1" = only ] && echo "$pid" ;; *) [ "$1" = except ] && echo "$pid" ;; esac
+  done
+}
+quit() {
+  pids=$(named "$1" "$2")
+  [ -z "$pids" ] && return
+  kill $pids 2>/dev/null
+  for _ in $(seq 100); do [ -z "$(named "$1" "$2")" ] && break; sleep 0.1; done
+}
+quit except "Hyprland gnome-shell Xwayland dbus-daemon pipewire wireplumber pipewire-pulse"
+quit only Hyprland
+quit only gnome-shell
+
+rm -f "$STATE/hypr/env"
+pids=$(ours)
 kill $pids 2>/dev/null
 for _ in $(seq 50); do pids=$(ours); [ -z "$pids" ] && break; sleep 0.1; done
 [ -n "$pids" ] && kill -9 $pids 2>/dev/null
