@@ -49,7 +49,8 @@ points `bin/relaunch` and `bin/run` at it; `bin/d` still drives GNOME, and Hyprl
 
 - The folder chooser (`xdg-desktop-portal-gtk`) tiles beside Glint: the portal gets no parent window. Typing a path
   in its location bar and pressing Enter does nothing; click through Home instead.
-- Area and Window both open xdph's region picker, which has no window mode. A click without a drag cancels it.
-- Portal shortcuts need binds in `hyprland.conf`; `hyprctl globalshortcuts` lists the ids, e.g.
-  `bind = CTRL ALT SHIFT SUPER, 3, global, dev.mchisolm0.glint:1/screen/Control+Alt+Shift+Meta+3`.
-- xdph sends a frame only when something changes, so a recording of a still window may fail to start.
+- Area opens xdph's region picker; a click without a drag cancels it. Window, Scroll and Record open the share
+  picker: click a window, then press Enter.
+- xdph registers shortcuts but ignores their keys, so Exact binds them itself over Hyprland's socket
+  (`hyprctl binds` lists them as `global` binds), skipping a chord the config already binds.
+- xdph sends a frame only when something changes, so Glint asks Hyprland to redraw when a cast's first frame is late.

@@ -12,8 +12,9 @@ use crate::{frames, gif, scroll, RecordOptions, Rect, Result, Shot, Video, Video
 use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
 use ashpd::desktop::screenshot::Screenshot;
 use ashpd::desktop::{PersistMode, Session};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
@@ -28,6 +29,8 @@ const SCROLL_FRAME: Duration = Duration::from_micros(1_000_000 / 30);
 const GIF_MAX_WIDTH: f64 = 1280.0;
 /// How long a recording may take to start, and an MP4 to finish writing.
 const PATIENCE: Duration = Duration::from_secs(10);
+/// How long a cast's first frame may take before the desktop is asked to redraw (`redraw`).
+const NUDGE: Duration = Duration::from_millis(300);
 /// The portal's restore token, so the next recording skips the chooser.
 const TOKEN: &str = "screencast.token";
 
@@ -163,8 +166,71 @@ pub(crate) fn area(rect: Rect, to: &Path) -> Result<Shot> {
 }
 
 /// Wayland has no window ids for apps, so `id` is unused: the person picks the window in the portal.
+/// Hyprland's screenshot picker takes only an area, so there it is one frame of a screen cast, whose chooser
+/// lists windows.
 pub(crate) fn window(_id: u32, to: &Path) -> Result<Shot> {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        return cast_frame(to);
+    }
     keep(&portal_png(true)?, None, to)
+}
+
+/// One frame of the window the person picks in the ScreenCast chooser, written to `to` with its mosaic.
+fn cast_frame(to: &Path) -> Result<Shot> {
+    if !has("pipewiresrc") {
+        return Err("GStreamer has no PipeWire source (pipewiresrc): install its PipeWire plugin".into());
+    }
+    let cast = cast(false, SourceType::WINDOW, None)?;
+    let crop = region(cast.size, (0, 0), None, false).ok_or("the window has no size")?;
+    let (width, height) = (crop.width, crop.height);
+    let source = vec!["pipewiresrc".into(), format!("fd={}", cast.remote.as_raw_fd()), format!("path={}", cast.node)];
+    let output = Output::Raw { width, height };
+    let mut gst = Gst::spawn(&pipeline(&source, cast.size, &crop, &output)?, &cast.remote, Stdio::piped())?;
+    drop(cast.remote);
+    // A read that never ends is left behind.
+    let mut stdout = gst.child.stdout.take().expect("piped");
+    let (sent, frame) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rgba = vec![0; (width * height * 4) as usize];
+        let _ = sent.send(stdout.read_exact(&mut rgba).map(|()| rgba));
+    });
+    let mut got = frame.recv_timeout(NUDGE);
+    if got.is_err() {
+        redraw();
+        got = frame.recv_timeout(PATIENCE);
+    }
+    let Ok(Ok(rgba)) = got else {
+        return Err(gst.failed("the window sent no picture"));
+    };
+    drop(gst);
+    let _ = pollster::block_on(cast.session.close());
+    crate::write_png(to, &rgba, width, height)?;
+    let mosaic = crate::write_mosaic(to, &rgba, width, height)?;
+    Ok(Shot { width, height, mosaic })
+}
+
+/// Sends `command` to the Hyprland this runs under, over its IPC socket, and returns its answer.
+fn hyprctl(command: &str) -> Option<String> {
+    let signature = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
+    let run = std::env::var("XDG_RUNTIME_DIR").ok()?;
+    let mut socket = UnixStream::connect(format!("{run}/hypr/{signature}/.socket.sock")).ok()?;
+    socket.write_all(command.as_bytes()).ok()?;
+    let mut answer = String::new();
+    socket.read_to_string(&mut answer).ok()?;
+    Some(answer)
+}
+
+/// Hyprland casts a frame only when something on screen changes, so a still window or screen never sends its
+/// first. Setting the cursor zoom to what it already is redraws every monitor and changes nothing.
+/// Elsewhere it does nothing.
+fn redraw() {
+    let Some(zoom) = hyprctl("j/getoption cursor:zoom_factor") else {
+        return;
+    };
+    let zoom = zoom.split("\"float\":").nth(1).and_then(|v| v.split([',', '}']).next()).map(str::trim);
+    if let Some(zoom) = zoom.filter(|z| z.parse::<f64>().is_ok()) {
+        let _ = hyprctl(&format!("keyword cursor:zoom_factor {zoom}"));
+    }
 }
 
 /// A started ScreenCast session: its PipeWire remote and the one stream picked.
@@ -542,8 +608,13 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
                 started: Instant::now(),
             };
             // Frames are flowing once mp4mux has written something.
-            let until = Instant::now() + PATIENCE;
+            let (begun, until) = (Instant::now(), Instant::now() + PATIENCE);
+            let mut nudged = false;
             while std::fs::metadata(to).map_or(0, |m| m.len()) == 0 {
+                if !nudged && begun.elapsed() > NUDGE {
+                    redraw();
+                    nudged = true;
+                }
                 if recording.gst.child.try_wait().map_err(|e| e.to_string())?.is_some() {
                     return Err(recording.gst.failed("the recording failed to start"));
                 }
@@ -580,7 +651,12 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
                 height,
                 started: Instant::now(),
             };
-            if flowing.recv_timeout(PATIENCE).is_err() {
+            let mut first = flowing.recv_timeout(NUDGE);
+            if first.is_err() {
+                redraw();
+                first = flowing.recv_timeout(PATIENCE);
+            }
+            if first.is_err() {
                 return Err(recording.gst.failed("the recording never started"));
             }
             recording.started = Instant::now();

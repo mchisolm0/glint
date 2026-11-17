@@ -53,7 +53,9 @@ shape Viewport
   height: number
   devicePixelRatio: option<number>
 
-fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut, e: GlobalShortcut, f: GlobalShortcut, linux: bool): string = a.registered and b.registered and c.registered and d.registered and e.registered and f.registered ? (linux ? "Shift+Ctrl+Alt+Super 3 screen · 4 area · 2 window · 5 record · 1 scroll" : "Hyper 3 screen · 4 area · 2 window · 5 record · 1 scroll · T text") : linux ? "A shortcut is not set; set them in Settings, Apps, Glint." : "A shortcut is taken by another app; use the menu bar item."
+// On Linux a chord is in use only where Glint binds it itself (Hyprland) and the config already has it.
+fn inUse(k: GlobalShortcut): bool = match k.reason { case some(r) => r == "in-use", case none => false }
+fn keysLine(a: GlobalShortcut, b: GlobalShortcut, c: GlobalShortcut, d: GlobalShortcut, e: GlobalShortcut, f: GlobalShortcut, linux: bool): string = a.registered and b.registered and c.registered and d.registered and e.registered and f.registered ? (linux ? "Shift+Ctrl+Alt+Super 3 screen · 4 area · 2 window · 5 record · 1 scroll" : "Hyper 3 screen · 4 area · 2 window · 5 record · 1 scroll · T text") : linux ? (inUse(a) or inUse(b) or inUse(c) or inUse(d) or inUse(e) or inUse(f) ? "A shortcut's keys are already bound in your desktop's config." : "A shortcut is not set; set them in Settings, Apps, Glint.") : "A shortcut is taken by another app; use the menu bar item."
 fn clock(ms: number): string = `${floor(ms / 60000)}:${floor(ms / 1000) % 60 < 10 ? "0" : ""}${floor(ms / 1000) % 60}`
 fn sizeLine(c: Capture): string = c.kind == "png" ? `${c.width}×${c.height}` : `${c.kind.toUpperCase()} ${clock(c.duration)} · ${c.width}×${c.height}`
 // A failure worth showing: a picker the person cancelled is not one.
@@ -252,7 +254,8 @@ component Glint
             recH = a.height
             send recording = startRecording(a.x, a.y, a.width, a.height, still ? "scroll" : recFormat, recCursor and not still, recClicks and not still, recAudio and not still, recMic and not still, saveDir.native)
           else
-            if a.window != 0
+            // On Linux a window pick is empty: the desktop's picker asks which window.
+            if a.window != 0 or (picking == "window" and a.width == 0)
               send staged = captureWindow(a.window, saveDir.native)
             else
               send staged = captureArea(a.x, a.y, a.width, a.height, saveDir.native)
