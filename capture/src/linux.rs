@@ -5,7 +5,7 @@
 //!
 //! Wayland lets no app read the pointer or other windows, so the portal's own picker stands in for Glint's
 //! overlay: `area` with an empty rect and `window` show it, and a recording's first start shows the desktop's
-//! chooser (a restore token beside the recording skips it after that). Rects are the portal picture's
+//! chooser (a restore token in Glint's state folder skips it after that). Rects are the portal picture's
 //! pixels, origin top-left: at scale 1 that is the desktop's points.
 
 use crate::{frames, gif, scroll, RecordOptions, Rect, Result, Shot, Video, VideoKind};
@@ -28,8 +28,18 @@ const SCROLL_FRAME: Duration = Duration::from_micros(1_000_000 / 30);
 const GIF_MAX_WIDTH: f64 = 1280.0;
 /// How long a recording may take to start, and an MP4 to finish writing.
 const PATIENCE: Duration = Duration::from_secs(10);
-/// Beside each recording: the portal's restore token, so the next one skips the chooser.
+/// The portal's restore token, so the next recording skips the chooser.
 const TOKEN: &str = "screencast.token";
+
+/// `$XDG_STATE_HOME/glint/screencast.token` (`~/.local/state` when unset), never beside a recording, which
+/// may be in the person's own folder.
+fn token_path() -> std::path::PathBuf {
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
+    state.join("glint").join(TOKEN)
+}
 
 /// A portal failure in words a person can act on. `what` names the request ("the screenshot"); `asked`
 /// says whether the person was shown a picker, whose cancel is theirs, or only a permission prompt.
@@ -195,6 +205,7 @@ fn cast(cursor: bool, sources: SourceType, token: Option<&Path>) -> Result<Cast>
     });
     let (session, streams, remote) = started.map_err(|e| refusal(e, "the recording", true))?;
     if let (Some(next), Some(token)) = (streams.restore_token(), token) {
+        let _ = token.parent().map(std::fs::create_dir_all);
         let _ = std::fs::write(token, next);
     }
     let Some((stream, (w, h))) = streams.streams().first().and_then(|s| Some((s, s.size()?))) else {
@@ -492,7 +503,7 @@ fn start(options: &RecordOptions, to: &Path) -> Result<Recording> {
     if !has("pipewiresrc") {
         return Err("GStreamer has no PipeWire source (pipewiresrc): install its PipeWire plugin".into());
     }
-    let token = to.with_file_name(TOKEN);
+    let token = token_path();
     // A scrolling capture asks every time, since each one is likely a different window.
     let scroll = options.kind == VideoKind::Scroll;
     // A scrolling capture is of one window: a whole display stitches only where nothing else on it moves
