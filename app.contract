@@ -230,17 +230,19 @@ component Glint
   action chose(value: string)
     saveFolder = value
     send folderSet = saveDir(value)
-  // The folder resolved: the capture that asked for it goes on.
   action afterFolder
     match folderSet
       case some(d)
         saveTo = d.native
         note = ""
-        if resume != "" and d.native != ""
-          capture(resume, d.native)
-          resume = ""
       case none
         note = ""
+  // The capture that asked for a folder goes on once there is one, after the picker has left the screen.
+  task resumeCapture when resume != "" and saveTo != "" key=saveTo
+    after(600, onResume)
+  action onResume
+    capture(resume, saveTo)
+    resume = ""
   action stop
     recordingOn = false
     send hud = hideHud()
