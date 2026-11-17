@@ -1,0 +1,79 @@
+#!/bin/sh
+# Starts a private headless GNOME session: gnome-shell --headless with one virtual monitor, on its own D-Bus,
+# runtime dir, HOME and PipeWire. Nothing here talks to the desktop you are logged into. `session/stop` ends it.
+set -eu
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+. "$here/env.sh"
+SIZE=${GLINT_E2E_SIZE:-1920x1080}
+
+if [ -S "$XDG_RUNTIME_DIR/bus" ] && gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+  --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1; then
+  echo "session already running ($STATE)"; exit 0
+fi
+"$here/session/stop" >/dev/null 2>&1 || true
+
+mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME/applications" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" \
+  "$LOGS" "$PIDS" "$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d" "$XDG_CONFIG_HOME/pipewire/pipewire.conf.d" \
+  "$XDG_CONFIG_HOME/xdg-desktop-portal"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+# PipeWire here serves screencasts only: no ALSA, Bluetooth or camera devices, so it never competes with the
+# real session's audio. A null sink gives "system audio" (@DEFAULT_MONITOR@) something to record.
+cat > "$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/90-no-devices.conf" <<'EOF'
+wireplumber.profiles = {
+  main = {
+    monitor.alsa = disabled
+    monitor.alsa-midi = disabled
+    monitor.bluez = disabled
+    monitor.bluez-midi = disabled
+    monitor.v4l2 = disabled
+    monitor.libcamera = disabled
+  }
+}
+EOF
+cat > "$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/90-null-sink.conf" <<'EOF'
+context.objects = [
+  { factory = adapter
+    args = { factory.name = support.null-audio-sink node.name = glint-null media.class = Audio/Sink
+             audio.position = [ FL FR ] } }
+]
+EOF
+# The GNOME portal backends, chosen in this HOME's config rather than the system's per-desktop files.
+cat > "$XDG_CONFIG_HOME/xdg-desktop-portal/portals.conf" <<'EOF'
+[preferred]
+default=gnome;gtk
+EOF
+
+bg() { # bg <name> <command...>: runs it in the background with its log and pid under $STATE.
+  name=$1; shift
+  env -u GLINT_E2E_HARNESS "$@" >"$LOGS/$name.log" 2>&1 </dev/null &
+  echo $! >"$PIDS/$name"
+}
+
+bg dbus dbus-daemon --session --nofork --nopidfile --address="$DBUS_SESSION_BUS_ADDRESS"
+for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 0.1; done
+
+# Settings land in this HOME's dconf: no lock screen, blanking or animations to wait out.
+gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+gsettings set org.gnome.desktop.interface enable-animations false
+gsettings set org.gnome.desktop.interface enable-hot-corners false
+gsettings set org.gnome.desktop.notifications show-banners false
+
+bg pipewire pipewire
+for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
+bg wireplumber wireplumber
+bg pipewire-pulse pipewire-pulse
+
+bg gnome-shell gnome-shell --headless --no-x11 --wayland-display="$WAYLAND_DISPLAY" --virtual-monitor "$SIZE"
+if ! gdbus wait --session --timeout 30 org.gnome.Mutter.RemoteDesktop || ! gdbus wait --session --timeout 30 org.gnome.Shell.Screenshot; then
+  echo "gnome-shell did not start; see $LOGS/gnome-shell.log" >&2; tail -20 "$LOGS/gnome-shell.log" >&2; exit 1
+fi
+
+bg drive python3 -I "$here/drive.py" serve
+for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/glint-drive.sock" ] && break; sleep 0.1; done
+[ -S "$XDG_RUNTIME_DIR/glint-drive.sock" ] || { echo "the driver did not start; see $LOGS/drive.log" >&2; exit 1; }
+# GNOME starts in the overview, and an Escape sent before it has settled is lost.
+sleep 1
+"$here/bin/d" key Escape >/dev/null
+echo "session up: $SIZE, state in $STATE"

@@ -1,0 +1,19 @@
+#!/bin/sh
+# (Re)starts Glint inside the headless session, after copying its desktop entry into the private HOME (the
+# portals accept an app id only with one). Its stdout and stderr go to $STATE/log/glint.log.
+# GLINT_BIN overrides the binary; the default is what `bun exact.mjs linux` builds.
+set -eu
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+. "$here/env.sh"
+bin=${GLINT_BIN:-$GLINT/target/host-dev/glint-linux}
+[ -x "$bin" ] || { echo "no Glint build at $bin: run bun exact.mjs linux" >&2; exit 1; }
+[ -S "$XDG_RUNTIME_DIR/bus" ] || { echo "the session is not running: session/start" >&2; exit 1; }
+
+entry=$(dirname "$bin")/dev.mchisolm0.glint.desktop
+sed "s|^Exec=.*|Exec=$bin|" "$entry" >"$XDG_DATA_HOME/applications/dev.mchisolm0.glint.desktop"
+update-desktop-database "$XDG_DATA_HOME/applications" 2>/dev/null || true
+
+pkill -u "$(id -u)" -xf "$bin" 2>/dev/null && sleep 0.5 || true
+env -u GLINT_E2E_HARNESS "$bin" >>"$LOGS/glint.log" 2>&1 </dev/null &
+echo $! >"$PIDS/glint"
+echo "glint $! (log: $LOGS/glint.log)"

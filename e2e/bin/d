@@ -1,0 +1,6 @@
+#!/bin/sh
+# Drives the headless session (drive.py): `d click 400 300`, `d key ctrl+alt+shift+super+3`, `d shot /tmp/s.png`.
+# `d help` lists the commands.
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+. "$here/env.sh"
+exec python3 -I "$here/drive.py" "$@"

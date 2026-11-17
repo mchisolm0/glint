@@ -1,0 +1,22 @@
+#!/bin/sh
+# Ends the headless session: every process of yours whose XDG_RUNTIME_DIR is this session's, which covers what
+# D-Bus activated (portals, dconf) as well as what session/start launched. Other sessions are never touched.
+set -u
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+. "$here/env.sh"
+
+ours() {
+  for pid in $(pgrep -u "$(id -u)"); do
+    vars=$(tr '\0' '\n' 2>/dev/null </proc/"$pid"/environ) || continue
+    printf '%s\n' "$vars" | grep -qxF "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" || continue
+    printf '%s\n' "$vars" | grep -qx 'GLINT_E2E_HARNESS=1' || echo "$pid"
+  done
+}
+
+pids=$(ours)
+[ -z "$pids" ] && { echo "session not running"; rm -f "$XDG_RUNTIME_DIR/bus" "$XDG_RUNTIME_DIR/glint-drive.sock"; exit 0; }
+kill $pids 2>/dev/null
+for _ in $(seq 50); do pids=$(ours); [ -z "$pids" ] && break; sleep 0.1; done
+[ -n "$pids" ] && kill -9 $pids 2>/dev/null
+rm -f "$PIDS"/* "$XDG_RUNTIME_DIR/bus" "$XDG_RUNTIME_DIR/glint-drive.sock"
+echo "session stopped"
