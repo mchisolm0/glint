@@ -73,6 +73,8 @@ component Glint
   resource request = requests() as shape Request else empty(seq=0, kind="", path="")
   resource viewport = exactViewport() as shape Viewport
   resource platform = platform() as shape Platform else empty(os="")
+  // "" until a folder is chosen, or when the chosen one is no longer held (moved, or forgotten at a relaunch).
+  resource saveDir = saveDir(saveFolder) as shape SaveDir else empty(native="")
   resource login = loginItemStatus() as shape LoginItemStatus else empty(available=false, state="unknown", hidden=false, launchedAtLogin=false)
   mutation area as shape Area then afterArea
   mutation staged as shape Staged then afterStaged
@@ -87,7 +89,6 @@ component Glint
   mutation acted as shape Reply
   mutation removed as shape Reply refreshes captures
   mutation loginSet as shape LoginItemStatus refreshes login
-  mutation folderSet as shape SaveDir then afterFolder
 
   // Settings, kept across launches.
   state copyAfter = true persist
@@ -97,9 +98,8 @@ component Glint
   state recClicks = true persist
   state recAudio = false persist
   state recMic = false persist
-  // On Linux, the `doc:` folder captures go to (kept across launches by `doc.keep`) and its native path.
+  // On Linux, the `doc:` folder captures go to, kept across launches by `doc.keep`.
   state saveFolder = "" persist
-  state saveTo = "" persist
 
   // The library and what a capture is for.
   state selected = ""
@@ -114,7 +114,7 @@ component Glint
   // Linux's host shows PNGs only (no video player or GIF decoder) and copies PNGs and text only.
   derive onLinux = platform.os == "linux"
   // A Linux capture waits for the person to choose a folder; `resume` is the one waiting.
-  derive needsFolder = onLinux and saveTo == ""
+  derive needsFolder = onLinux and saveDir.native == ""
   state resume = ""
   derive current = first(captures.filter(c => c.path == selected))
   // A recording or a scrolling capture (picking == "scroll") is running.
@@ -211,7 +211,7 @@ component Glint
     if needsFolder
       askFolder(id)
     else
-      capture(id, saveTo)
+      capture(id, saveDir.native)
   // `dir` is where Rust writes the capture (data/src/lib.rs `staged`).
   action capture(id: string, dir: string)
     if not busy
@@ -229,19 +229,12 @@ component Glint
     showDirectoryPicker("save-folder", startIn=(saveFolder != "" ? saveFolder : "screenshots"))
   action chose(value: string)
     saveFolder = value
-    send folderSet = saveDir(value)
-  action afterFolder
-    match folderSet
-      case some(d)
-        saveTo = d.native
-        note = ""
-      case none
-        note = ""
+    note = ""
   // The capture that asked for a folder goes on once there is one, after the picker has left the screen.
-  task resumeCapture when resume != "" and saveTo != "" key=saveTo
+  task resumeCapture when resume != "" and saveDir.native != "" key=saveDir.native
     after(600, onResume)
   action onResume
-    capture(resume, saveTo)
+    capture(resume, saveDir.native)
     resume = ""
   action stop
     recordingOn = false
@@ -257,12 +250,12 @@ component Glint
             recY = a.y
             recW = a.width
             recH = a.height
-            send recording = startRecording(a.x, a.y, a.width, a.height, still ? "scroll" : recFormat, recCursor and not still, recClicks and not still, recAudio and not still, recMic and not still, saveTo)
+            send recording = startRecording(a.x, a.y, a.width, a.height, still ? "scroll" : recFormat, recCursor and not still, recClicks and not still, recAudio and not still, recMic and not still, saveDir.native)
           else
             if a.window != 0
-              send staged = captureWindow(a.window, saveTo)
+              send staged = captureWindow(a.window, saveDir.native)
             else
-              send staged = captureArea(a.x, a.y, a.width, a.height, saveTo)
+              send staged = captureArea(a.x, a.y, a.width, a.height, saveDir.native)
       case none
         note = ""
   action afterRecording
@@ -278,7 +271,7 @@ component Glint
         if picking == "text"
           send read = detectText(image=s.path)
         else
-          send shot = keepCapture(s.path, s.taken, s.width, s.height, s.kind, s.duration, s.mosaic, saveTo == "" ? "" : saveFolder)
+          send shot = keepCapture(s.path, s.taken, s.width, s.height, s.kind, s.duration, s.mosaic, saveDir.native == "" ? "" : saveFolder)
       case none
         note = ""
   action afterShot
@@ -608,7 +601,7 @@ component Glint
           if onLinux
             text "Save to" font-size=11 color="-exact-secondary-label"
             row gap=6 align-items="center"
-              text (saveTo == "" ? "No folder yet" : saveTo) flex=1 font-size=12 testId="set-folder-path"
+              text (saveDir.native == "" ? "No folder yet" : saveDir.native) flex=1 font-size=12 testId="set-folder-path"
               button press=chooseFolder testId="set-folder"
                 text "Choose…"
           text "Recording" font-size=11 color="-exact-secondary-label"

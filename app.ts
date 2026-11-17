@@ -119,16 +119,9 @@ const sources: TypeScriptSources = {
     const names = await list(storage);
     return names.flatMap((n) => entry(n, names) ?? []).sort((a, b) => b.taken - a.taken);
   },
-  // The native path of the folder captures go to on Linux, or "" until one is chosen (or it is gone).
-  saveDir: async ([chosen], _store, storage) => {
-    if (!chosen) return { native: '' };
-    try {
-      return { native: await storage.fs.realpath(chosen) };
-    } catch (e) {
-      if ((e as { code?: string }).code === 'ENOENT') return { native: '' };
-      throw e;
-    }
-  },
+  // The native path of the folder captures go to on Linux, or "" until one is chosen. A folder this launch
+  // does not hold (gone, moved, or not kept) is refused, and "" asks the person to choose again.
+  saveDir: async ([chosen], _store, storage) => ({ native: chosen ? await storage.fs.realpath(chosen).catch(() => '') : '' }),
   // `stem` is data/src/lib.rs's `named`.
   keepCapture: async ([staged, taken, width, height, kind, duration, mosaic, chosen], _store, storage, native) => {
     const stem = `glint-${taken}-${width}x${height}${kind === 'png' ? '' : `-${duration}`}`;
