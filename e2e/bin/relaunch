@@ -1,10 +1,11 @@
 #!/bin/sh
 # (Re)starts Glint inside the headless session, after copying its desktop entry into the private HOME (the
 # portals accept an app id only with one). Its stdout and stderr go to $STATE/log/glint.log.
-# GLINT_BIN overrides the binary; the default is what `bun exact.mjs linux` builds.
+# GLINT_E2E_DESKTOP=hyprland runs it in the nested Hyprland session instead. GLINT_BIN overrides the binary; the default is what `bun exact.mjs linux` builds.
 set -eu
 here=$(cd -P "$(dirname "$0")/.." && pwd)
 . "$here/env.sh"
+if [ "${GLINT_E2E_DESKTOP:-}" = hyprland ]; then . "$here/hypr.sh"; fi
 bin=${GLINT_BIN:-$GLINT/target/host-dev/glint-linux}
 [ -x "$bin" ] || { echo "no Glint build at $bin: run bun exact.mjs linux" >&2; exit 1; }
 [ -S "$XDG_RUNTIME_DIR/bus" ] || { echo "the session is not running: session/start" >&2; exit 1; }

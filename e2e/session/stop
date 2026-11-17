@@ -1,20 +1,45 @@
 #!/bin/sh
 # Ends the headless session: every process of yours whose XDG_RUNTIME_DIR is this session's, which covers what
-# D-Bus activated (portals, dconf) as well as what session/start launched. Other sessions are never touched.
+# D-Bus activated (portals, dconf) as well as what session/start launched, and the same for the nested Hyprland
+# session (session/hypr). Other sessions are never touched.
 set -u
 here=$(cd -P "$(dirname "$0")/.." && pwd)
 . "$here/env.sh"
 
+hypr_run=/tmp/glint-hypr-$(id -u) # hypr.sh
 ours() {
   for pid in $(pgrep -u "$(id -u)"); do
     vars=$(tr '\0' '\n' 2>/dev/null </proc/"$pid"/environ) || continue
-    printf '%s\n' "$vars" | grep -qxF "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" || continue
+    printf '%s\n' "$vars" | grep -qxF -e "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" -e "XDG_RUNTIME_DIR=$hypr_run" || continue
     printf '%s\n' "$vars" | grep -qx 'GLINT_E2E_HARNESS=1' || echo "$pid"
   done
 }
 
 pids=$(ours)
 [ -z "$pids" ] && { echo "session not running"; rm -f "$XDG_RUNTIME_DIR/bus" "$XDG_RUNTIME_DIR/glint-drive.sock"; exit 0; }
+
+# Torn down in order, since anything that loses its compositor or bus mid-shutdown can crash and dump core,
+# which Hyprland reports on the real desktop: first the clients (Glint, portals, the driver), then each
+# compositor alone, nested Hyprland before the gnome-shell it draws in, as each stops its own Xwayland, then
+# the buses and PipeWire. `named` lists ours by process name; `except` drops those.
+named() {
+  for pid in $(ours); do
+    comm=$(cat /proc/"$pid"/comm 2>/dev/null) || continue
+    case " $2 " in *" $comm "*) [ "$1" = only ] && echo "$pid" ;; *) [ "$1" = except ] && echo "$pid" ;; esac
+  done
+}
+quit() {
+  pids=$(named "$1" "$2")
+  [ -z "$pids" ] && return
+  kill $pids 2>/dev/null
+  for _ in $(seq 100); do [ -z "$(named "$1" "$2")" ] && break; sleep 0.1; done
+}
+quit except "Hyprland gnome-shell Xwayland dbus-daemon pipewire wireplumber pipewire-pulse"
+quit only Hyprland
+quit only gnome-shell
+
+rm -f "$STATE/hypr/env"
+pids=$(ours)
 kill $pids 2>/dev/null
 for _ in $(seq 50); do pids=$(ours); [ -z "$pids" ] && break; sleep 0.1; done
 [ -n "$pids" ] && kill -9 $pids 2>/dev/null
