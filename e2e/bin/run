@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs a command inside the headless session's environment, e.g. `run gst-launch-1.0 videotestsrc ! waylandsink`.
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+. "$here/env.sh"
+exec env -u GLINT_E2E_HARNESS "$@"
