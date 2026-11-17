@@ -6,7 +6,9 @@ import type { Args, Ctx2D, Frame, NativeModule, Result, Storage, TypeScriptAnswe
 // One annotation, as app.contract's Mark shape (shapes.contract).
 type Mark = Args<'saveEdit'>[1][number];
 
-// The staging folders are data/src/lib.rs's STAGING (/private/tmp/glint on macOS, /tmp/glint on Linux).
+// The staging folders are data/src/lib.rs's STAGING (/private/tmp/glint on macOS, /tmp/glint elsewhere). On Linux
+// captures go to a folder the person chose (`doc:`), kept across launches, which the host copies from past
+// readFile's 16 MiB result.
 export const grants = [
   'device.global-shortcuts',
   'device.login-item',
@@ -17,6 +19,9 @@ export const grants = [
   'fs.write /private/tmp/glint',
   'fs.read /tmp/glint',
   'fs.write /tmp/glint',
+  'fs.read doc:/',
+  'fs.write doc:/',
+  'doc.keep',
 ].join('\n');
 
 const folder = 'app:/data/captures';
@@ -80,11 +85,18 @@ function entry(name: string, names: readonly string[]) {
   };
 }
 
-// Moves a staged file into the library: a rename on the Mac, the bytes through here elsewhere.
-async function adopt(from: string, to: string, storage: Storage, native?: NativeModule | null) {
+// Moves a staged file into the library: a rename on the Mac; a host copy from the chosen `folder`, which keeps
+// the capture (`keep`); else the bytes through here.
+async function adopt(from: string, to: string, storage: Storage, native: NativeModule | null | undefined, folder: string, keep: boolean) {
   const swift = mac(native);
   if (swift) {
     await swift.later({ op: 'adopt', from, to });
+    return;
+  }
+  if (folder) {
+    const chosen = `${folder}/${from.slice(from.lastIndexOf('/') + 1)}`;
+    await storage.fs.copyFile(chosen, to);
+    if (!keep) await storage.fs.rm(chosen);
     return;
   }
   await storage.fs.writeFile(to, await storage.fs.readFile(from));
@@ -107,12 +119,23 @@ const sources: TypeScriptSources = {
     const names = await list(storage);
     return names.flatMap((n) => entry(n, names) ?? []).sort((a, b) => b.taken - a.taken);
   },
-  keepCapture: async ([staged, taken, width, height, kind, duration, mosaic], _store, storage, native) => {
+  // The native path of the folder captures go to on Linux, or "" until one is chosen (or it is gone).
+  saveDir: async ([chosen], _store, storage) => {
+    if (!chosen) return { native: '' };
+    try {
+      return { native: await storage.fs.realpath(chosen) };
+    } catch (e) {
+      if ((e as { code?: string }).code === 'ENOENT') return { native: '' };
+      throw e;
+    }
+  },
+  // `stem` is data/src/lib.rs's `named`.
+  keepCapture: async ([staged, taken, width, height, kind, duration, mosaic, chosen], _store, storage, native) => {
     const stem = `glint-${taken}-${width}x${height}${kind === 'png' ? '' : `-${duration}`}`;
     const name = `${stem}.${kind}`;
     await storage.fs.mkdir(folder);
-    await adopt(staged, `${folder}/${name}`, storage, native);
-    if (mosaic) await adopt(mosaic, `${folder}/${stem}.mosaic.png`, storage, native);
+    await adopt(staged, `${folder}/${name}`, storage, native, chosen, true);
+    if (mosaic) await adopt(mosaic, `${folder}/${stem}.mosaic.png`, storage, native, chosen, false);
     const names = await list(storage);
     const kept = entry(name, names);
     if (!kept) throw new Error(`kept an unlisted name: ${name}`);

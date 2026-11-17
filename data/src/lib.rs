@@ -4,7 +4,8 @@
 //!
 //! Why staging: a Rust source's storage requests take `app:/` paths only, and write binary as a JSON array of
 //! numbers capped at 16 MiB per request, which a Retina PNG can overflow. So Rust writes the file itself, outside
-//! app storage, and the Mac's Swift module (or TypeScript elsewhere) moves it in.
+//! app storage, and the Mac's Swift module moves it in. On Linux it writes into the folder the person chose
+//! (a `doc:` folder; each capture source's last argument is its native path), from which the host copies it in.
 
 use exact_runner::{Answer, DataError, DataSource, Store, Value};
 
@@ -76,22 +77,34 @@ mod native {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
     }
 
-    /// `<STAGING>/<taken>.<extension>`, with the folder made.
-    fn staged(taken: f64, extension: &str) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(STAGING).map_err(|e| format!("{STAGING}: {e}"))?;
-        Ok(Path::new(STAGING).join(format!("{taken}.{extension}")))
+    /// `<folder>/<taken>.<extension>`, in the chosen folder or else STAGING, made if need be.
+    fn staged(folder: &str, taken: f64, extension: &str) -> Result<PathBuf, String> {
+        let folder = if folder.is_empty() { STAGING } else { folder };
+        std::fs::create_dir_all(folder).map_err(|e| format!("{folder}: {e}"))?;
+        Ok(Path::new(folder).join(format!("{taken}.{extension}")))
+    }
+
+    /// Renames a finished capture to its library name (app.ts `keepCapture`, docs/design.md), so the chosen
+    /// folder holds what the library does: glint-<taken>-<w>x<h>.png, or -<ms>.<extension> for a recording.
+    fn named(path: &Path, staged: &Staged) -> Result<PathBuf, String> {
+        let Staged { taken, width, height, duration, kind, .. } = staged;
+        let stem = format!("glint-{taken}-{width}x{height}");
+        let name = if kind == "png" { format!("{stem}.png") } else { format!("{stem}-{duration}.{kind}") };
+        let to = path.with_file_name(name);
+        std::fs::rename(path, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        Ok(to)
     }
 
     fn text(path: &Path) -> String {
         path.to_string_lossy().into_owned()
     }
 
-    fn shot(take: impl FnOnce(&Path) -> glint_capture::Result<Shot>) -> Result<Value, String> {
+    fn shot(folder: &str, take: impl FnOnce(&Path) -> glint_capture::Result<Shot>) -> Result<Value, String> {
         let taken = now();
-        let path = staged(taken, "png")?;
+        let path = staged(folder, taken, "png")?;
         let shot = take(&path)?;
-        let staged = Staged {
-            path: text(&path),
+        let mut staged = Staged {
+            path: String::new(),
             taken,
             width: f64::from(shot.width),
             height: f64::from(shot.height),
@@ -99,6 +112,7 @@ mod native {
             duration: 0.0,
             mosaic: text(&shot.mosaic),
         };
+        staged.path = text(&named(&path, &staged)?);
         Ok(staged.to_value())
     }
 
@@ -107,9 +121,9 @@ mod native {
         match source {
             // Where the app runs, so the view leaves out the Mac's panels and menu bar item elsewhere.
             "platform" => Ok(Platform { os: std::env::consts::OS.into() }.to_value()),
-            "captureScreen" => shot(glint_capture::screen),
-            "captureArea" => shot(|to| glint_capture::area(stand_in(args.rect(0)), to)),
-            "captureWindow" => shot(|to| glint_capture::window(args.number(0) as u32, to)),
+            "captureScreen" => shot(args.text(0), glint_capture::screen),
+            "captureArea" => shot(args.text(4), |to| glint_capture::area(stand_in(args.rect(0)), to)),
+            "captureWindow" => shot(args.text(1), |to| glint_capture::window(args.number(0) as u32, to)),
             "startRecording" => {
                 if live.is_some() {
                     return Err("a recording is already running".into());
@@ -124,7 +138,7 @@ mod native {
                     microphone: args.flag(8),
                 };
                 let started = now();
-                let path = staged(started, options.kind.extension())?;
+                let path = staged(args.text(9), started, options.kind.extension())?;
                 let recording = glint_capture::record(&options, &path)?;
                 let kind = recording.kind().extension().into();
                 *live = Some(Live { recording, path, started });
@@ -135,8 +149,8 @@ mod native {
                 let scroll = recording.kind() == VideoKind::Scroll;
                 let kind = recording.kind().extension().into();
                 let video = recording.stop()?;
-                let staged = Staged {
-                    path: text(&path),
+                let mut staged = Staged {
+                    path: String::new(),
                     taken: started,
                     width: f64::from(video.width),
                     height: f64::from(video.height),
@@ -144,6 +158,7 @@ mod native {
                     duration: video.duration_ms as f64,
                     mosaic: if scroll { text(&glint_capture::mosaic_path(&path)) } else { String::new() },
                 };
+                staged.path = text(&named(&path, &staged)?);
                 Ok(staged.to_value())
             }
         }
@@ -157,8 +172,12 @@ impl Glint {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn run(&mut self, _: &str, _: &[Value]) -> Result<Value, String> {
-        Err("the browser cannot capture the screen".into())
+    fn run(&mut self, source: &str, _: &[Value]) -> Result<Value, String> {
+        use shapes::ContractValue as _;
+        match source {
+            "platform" => Ok(shapes::Platform { os: "web".into() }.to_value()),
+            _ => Err("the browser cannot capture the screen".into()),
+        }
     }
 }
 
