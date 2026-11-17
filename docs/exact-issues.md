@@ -52,8 +52,10 @@ KDE session". The `doc:` path keeps working until the app quits.
 - **Repro:** Glint's [`linux-save-folder`](https://github.com/mchisolm0/glint/pull/2) in the headless harness
   ([#1](https://github.com/mchisolm0/glint/pull/1)): choose a folder, then `grep -c dev.mchisolm0.glint
   ~/.local/share/recently-used.xbel`.
-- **Ask:** note the pick again once the portal's write lands (the store is already watched), or don't let a missing
-  mark alone drop a document chosen this session.
+- **Fix (tested diff):** [`9f9d113b1`](https://github.com/mchisolm0/exact/commit/9f9d113b1). `recheck` marks a
+  choice again when its mark goes within 10 s of it, rather than forgetting it; the launch test gains a stale rewrite
+  of the store right after a choice, and fails without the fix. Verified in the GNOME session: the folder survives a
+  relaunch.
 
 ---
 
