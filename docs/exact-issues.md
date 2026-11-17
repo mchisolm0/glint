@@ -12,7 +12,7 @@ Seven issues, one question (8), and one comment on an existing issue (9).
 
 ## 1. Canvas `drawImage` draws nothing for an `app:/` path (tested diff)
 
-**Host:** Web, macOS
+**Host:** Web, macOS (the painted host reads `app:/` in a canvas upstream now; recheck the web before filing)
 
 `ctx.drawImage("app:/data/red.png", …)` draws nothing and logs nothing, while an `image` node shows the same file.
 Canvas image handles load assets and http(s) URLs only.
@@ -29,26 +29,31 @@ Canvas image handles load assets and http(s) URLs only.
 
 ---
 
-## 2. A Rust source can't put a file over about 4.5 MB into `app:/` storage
+## 2. Linux: on GNOME, `doc.keep` forgets a picked folder within a second
 
-**Host:** macOS (the storage path is shared)
+**Host:** Linux (GNOME 51, xdg-desktop-portal-gnome, headless `gnome-shell` session)
 
-A Rust source that writes files (screen capture, recordings) can't get them into `app:/data`. In #230 the supported
-route for Rust app files was `Answer::Later(exact_data::storage::request(...))`, but that route carries the bytes as
-a JSON array under a 16 MiB cap (`runner/src/request.rs:15`), so a PNG over about 4.5 MB is refused and a recording
-is out of reach:
+An app granted `doc.keep` picks a folder with `showDirectoryPicker`. Exact keeps it: `kept-documents.json` gets the
+entry and `recently-used.xbel` gets the app's `bookmark:application` mark. Within 300 ms both are gone, and after a
+relaunch the `doc:` path refuses `ENOENT`. The portal's file chooser (Nautilus) writes its own recent entry for the
+same folder after the pick, rewriting the file from what it read before Exact's mark, so the mark is lost and
+Exact's watcher forgets the document.
 
-| Request | Result |
-| --- | --- |
-| Rust `fs.writeFile` of 5 MB | `storage request exceeds its byte limit` |
-| Rust `fs.copyFile`, native path to `app:/data` | `portable storage needs an app:/ path` (native paths are Windows only, `data/host/src/native.rs:531`) |
-| TS `copyFile` or `rename`, granted native path to `app:/data` | `filesystem: cannot mix app and native paths` |
+Sampled every 300 ms after pressing Select:
 
-- **Repro:** [`repros/2-native-file-to-app-storage`](https://github.com/mchisolm0/glint/tree/main/repros/2-native-file-to-app-storage), headless with `exact agent macos`.
-- **Workaround:** `readFile` then `writeFile` through the JS heap.
-- **Ask:** `copyFile` from a `doc:` file to `app:/` already has the host copy the bytes, past the 16 MiB result
-  (`docs/reference.md`, the `doc:` table). The same for a native path the app was granted, or a copy request for Rust
-  sources, would cover it.
+```
+13:37:30.226 glint-marks=1 kept={"documents":[{... "n":2,"name":"Screenshots" ...}], ...}
+13:37:30.533 glint-marks=0 kept={"documents":[],"next":3,"version":1}
+```
+
+The reference says the Linux rules were "checked against the current GTK portal ... sources, not in a real GNOME or
+KDE session". The `doc:` path keeps working until the app quits.
+
+- **Repro:** Glint's [`linux-save-folder`](https://github.com/mchisolm0/glint/pull/2) in the headless harness
+  ([#1](https://github.com/mchisolm0/glint/pull/1)): choose a folder, then `grep -c dev.mchisolm0.glint
+  ~/.local/share/recently-used.xbel`.
+- **Ask:** note the pick again once the portal's write lands (the store is already watched), or don't let a missing
+  mark alone drop a document chosen this session.
 
 ---
 
@@ -100,21 +105,31 @@ say `available` is false when the app links no module.
 
 ---
 
-## 6. Painted host: under a dark `color-scheme` root, popovers and the window ground stay light
+## 6. Painted host: `color-scheme="dark"` on the root doesn't reach popovers or the window's ground
 
-**Host:** Linux, Windows, Android (the painted host)
+**Host:** Linux (GNOME 50, system theme light); the code is the painted host's, so Windows and Android likely too
 
-With the system light and `color-scheme="dark"` on the root:
+**What happened.** Glint is always dark. `userInterfaceStyle` doesn't apply on Linux ("Android, Linux and Windows
+follow the device", `docs/contract-for-agents.md`), so we followed `docs/agent-pitfalls.md`'s fix for #552: "an
+always-dark design says `"userInterfaceStyle": "dark"` in `app.json` (or `color-scheme="dark"` on the root)". On
+GNOME with the light theme:
 
-- **A `popover`** under that root draws white unless it sets `color-scheme="dark"` itself.
-- **The window ground** stays white (`[255, 255, 255]`) while the text turns light, so the page reads as light text
-  on white until the root paints `-exact-background`. #10 calls the ground under a root with no background intended
-  ("the page is the platform's background"); the question is whether that background should follow the root's
-  scheme.
+- **The window:** text turned light, but the window stayed white, so the text was white on white and unreadable.
+- **The Settings popover:** opened as a white card with dark text, as if the root said nothing.
 
-- **Repro:** from [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s
-  patch: `cargo test -p exact-painted --test neutral_alert a_popover_under_a_dark_root_draws_dark` and
-  `cargo test -p exact-painted --lib a_dark_root_scheme_darkens_the_windows_ground`.
+**Expected:** what a browser does with `color-scheme: dark` on the root. The property is inherited, so a popover
+under the root is dark, and the root's scheme sets the canvas behind it, so the page is dark even with no
+background of its own. #10 says the page under a root with no background is the platform's background
+(`-exact-background`), so the question is whether that background should follow the root's scheme.
+
+**Workaround** (Glint
+[`68e048a`](https://github.com/mchisolm0/glint/commit/68e048a)): `background-color="-exact-background"` on the root,
+and `color-scheme="dark"` again on each popover.
+
+- **Repro:** two failing tests from [`repros/6-painted-host`](https://github.com/mchisolm0/glint/tree/main/repros/6-painted-host)'s
+  patch, each a light system with `color-scheme="dark"` on the root:
+  - `cargo test -p exact-painted --test neutral_alert a_popover_under_a_dark_root_draws_dark`: the popover draws light.
+  - `cargo test -p exact-painted --lib a_dark_root_scheme_darkens_the_windows_ground`: the ground is `[255, 255, 255]`.
 
 ---
 
@@ -167,5 +182,7 @@ asking, not proposing a merge.
 > picker is skipped after the first by the portal's restore token. The code is
 > [`capture/src/linux.rs`](https://github.com/mchisolm0/glint/blob/main/capture/src/linux.rs).
 >
-> On "the result as a file or image handle, not bytes through the data source": our capture writes a PNG natively and
-> hits the same wall getting it into `app:/` (#N, issue 2 above).
+> On "the result as a file or image handle, not bytes through the data source": that would help. Our capture writes
+> the file natively, and a Rust source can't move a file over about 4.5 MB into `app:/` (its storage requests carry
+> bytes as JSON under 16 MiB). We have Rust write into a folder the person chose and copy it in with `copyFile`
+> from `doc:`.
