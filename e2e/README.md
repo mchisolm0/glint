@@ -23,8 +23,8 @@ e2e/bin/d help               # move, click, down/up, drag, scroll, key, keydown/
 e2e/session/stop             # kills every process whose XDG_RUNTIME_DIR is the session's
 ```
 
-The library is `$STATE/home/.local/share/exact/dev.mchisolm0.glint/data/captures`. Staging is still the shared
-`/tmp/glint` (hardcoded in `data/src/lib.rs`).
+The library is `$STATE/home/.local/share/exact/dev.mchisolm0.glint/data/captures`. Captures land first in the folder
+picked on first capture; before one is picked, in the shared `/tmp/glint` (`data/src/lib.rs`).
 
 ## Quirks
 
@@ -34,7 +34,22 @@ The library is `$STATE/home/.local/share/exact/dev.mchisolm0.glint/data/captures
 - The capture portals see no app id (ashpd's connection is not registered), so dialogs say "An app".
 - First Screen: "Allow Apps to Take Screenshots?" Click Allow (1065,616); the private permission store keeps it.
 - First Record: the Share Screen chooser has the display preselected. Click Share (1245,328) only, since clicking
-  the display deselects it. The restore token in `/tmp/glint/screencast.token` skips it after that.
+  the display deselects it. The restore token in `$XDG_STATE_HOME/glint/screencast.token` skips it after that.
 - First launch: "Add Keyboard Shortcuts". Click Add (1161,334). Without `gnome-control-center` binding fails with
   "the portal ended the request".
 - A busy picture for big recordings: `e2e/bin/run gst-launch-1.0 videotestsrc pattern=snow ! waylandsink`.
+
+## Hyprland
+
+`e2e/session/hypr` starts a nested Hyprland (`hyprland` and `xdg-desktop-portal-hyprland` installed) as a window
+in the GNOME session, with its own HOME, D-Bus, PipeWire and portals under `$STATE/hypr`, and copies of your
+`~/.config/xdg-desktop-portal/hyprland-portals.conf` and `~/.config/hypr/xdph.conf`. `GLINT_E2E_DESKTOP=hyprland`
+points `bin/relaunch` and `bin/run` at it; `bin/d` still drives GNOME, and Hyprland's (0,0) is GNOME's (0,32).
+`e2e/bin/run hyprctl ...` works there too.
+
+- The folder chooser (`xdg-desktop-portal-gtk`) tiles beside Glint: the portal gets no parent window. Typing a path
+  in its location bar and pressing Enter does nothing; click through Home instead.
+- Area and Window both open xdph's region picker, which has no window mode. A click without a drag cancels it.
+- Portal shortcuts need binds in `hyprland.conf`; `hyprctl globalshortcuts` lists the ids, e.g.
+  `bind = CTRL ALT SHIFT SUPER, 3, global, dev.mchisolm0.glint:1/screen/Control+Alt+Shift+Meta+3`.
+- xdph sends a frame only when something changes, so a recording of a still window may fail to start.

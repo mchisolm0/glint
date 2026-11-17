@@ -1,0 +1,60 @@
+#!/bin/sh
+# Starts a nested Hyprland session inside the headless GNOME one (session/start runs first if needed), with the
+# portal backends and xdph settings your own ~/.config picks for Hyprland (copied, never changed). Glint then
+# runs in it with `GLINT_E2E_DESKTOP=hyprland bin/relaunch`. `session/stop` ends both.
+set -eu
+here=$(cd -P "$(dirname "$0")/.." && pwd)
+"$here/session/start"
+. "$here/env.sh"
+. "$here/hypr.sh"
+
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && hyprctl version >/dev/null 2>&1; then
+  echo "hyprland already running ($HYPR)"; exit 0
+fi
+rm -rf "$XDG_RUNTIME_DIR" "$HYPR/env"
+mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME/hypr" "$XDG_CONFIG_HOME/xdg-desktop-portal" "$XDG_DATA_HOME/applications" \
+  "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$LOGS" "$PIDS" \
+  "$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d" "$XDG_CONFIG_HOME/pipewire/pipewire.conf.d"
+chmod 700 "$XDG_RUNTIME_DIR"
+cp "$STATE/home/.config/wireplumber/wireplumber.conf.d/"* "$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/"
+cp "$STATE/home/.config/pipewire/pipewire.conf.d/"* "$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/"
+cp "$here/hyprland.conf" "$XDG_CONFIG_HOME/hypr/hyprland.conf"
+for f in hyprland-portals.conf portals.conf; do
+  if [ -f "$REAL_HOME/.config/xdg-desktop-portal/$f" ]; then cp "$REAL_HOME/.config/xdg-desktop-portal/$f" "$XDG_CONFIG_HOME/xdg-desktop-portal/"; fi
+done
+# Your xdph settings too (share picker, restore tokens), so Record behaves as on your desktop.
+if [ -f "$REAL_HOME/.config/hypr/xdph.conf" ]; then cp "$REAL_HOME/.config/hypr/xdph.conf" "$XDG_CONFIG_HOME/hypr/"; fi
+
+bg() { # bg <name> <command...>: runs it in the background with its log and pid under $HYPR.
+  name=$1; shift
+  env -u GLINT_E2E_HARNESS "$@" >"$LOGS/$name.log" 2>&1 </dev/null &
+  echo $! >"$PIDS/$name"
+}
+
+bg dbus dbus-daemon --session --nofork --nopidfile --address="$DBUS_SESSION_BUS_ADDRESS"
+for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 0.1; done
+bg pipewire pipewire
+for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
+bg wireplumber wireplumber
+bg pipewire-pulse pipewire-pulse
+
+# An absolute WAYLAND_DISPLAY makes Hyprland a client of the headless GNOME display, never the real seat.
+WAYLAND_DISPLAY=$OUTER_WAYLAND HYPRLAND_NO_SD_NOTIFY=1 HYPRLAND_NO_CRASHREPORTER=1 bg hyprland Hyprland
+for _ in $(seq 100); do
+  sig=$(ls "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
+  sock=$(cd "$XDG_RUNTIME_DIR" && ls -d wayland-* 2>/dev/null | grep -v '\.lock$' | head -1) || true
+  [ -n "$sig" ] && [ -n "$sock" ] && [ -S "$XDG_RUNTIME_DIR/hypr/$sig/.socket.sock" ] && break
+  sleep 0.1
+done
+[ -n "${sock:-}" ] || { echo "hyprland did not start; see $LOGS/hyprland.log" >&2; tail -20 "$LOGS/hyprland.log" >&2; exit 1; }
+printf 'export HYPRLAND_INSTANCE_SIGNATURE=%s WAYLAND_DISPLAY=%s\n' "$sig" "$sock" >"$HYPR/env"
+. "$HYPR/env"
+
+# The portals start here rather than by D-Bus activation, so they get the nested display and signature.
+dbus-update-activation-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP
+bg xdph /usr/lib/xdg-desktop-portal-hyprland
+bg portal-gtk /usr/lib/xdg-desktop-portal-gtk
+sleep 0.5
+bg portal /usr/lib/xdg-desktop-portal
+gdbus wait --session --timeout 15 org.freedesktop.portal.Desktop || { echo "the portal did not start; see $LOGS" >&2; exit 1; }
+echo "hyprland up: $sock ($sig), state in $HYPR"
