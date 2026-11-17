@@ -31,8 +31,9 @@ microphone optional) or GIF.
 
 ## Run
 
-Glint needs Exact's `glint` branch (a Canvas 2D image can name an `app:/` file; host binaries target macOS 14),
-checked out beside it at `../exact-glint` (`git worktree add ../exact-glint glint` in an Exact checkout).
+Glint needs the `glint-next` branch of [mchisolm0/exact](https://github.com/mchisolm0/exact/tree/glint-next) (a Canvas
+2D image can name an `app:/` file, host binaries target macOS 14, and a Linux desktop window keeps a chosen folder on
+GNOME), checked out beside it at `../exact-glint` (`git worktree add ../exact-glint glint-next` in an Exact checkout).
 Bun 1.4.2, and Xcode's `clang` and `swift` first on `PATH`.
 
 ```sh
