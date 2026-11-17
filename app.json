@@ -41,6 +41,7 @@
     }
   },
   "rust": {
+    "placement": "worker",
     "data": {
       "crate": "glint-data",
       "type": "glint_data::Glint"
