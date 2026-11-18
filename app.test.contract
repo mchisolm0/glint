@@ -130,3 +130,13 @@ test "a scrolling capture lands as one PNG in the editor"
   expect state current.kind == "png"
   expect state current.width >= 400
   expect tree has "ink"
+
+test "Escape saves unsaved marks and copies the picture"
+  tap "screen"
+  clock data
+  tap "ink" drag 120 60
+  type "ink" key "Escape"
+  clock data
+  expect state dirty == false
+  expect state current.edited == true
+  expect text "status-line" == "Saved and copied"

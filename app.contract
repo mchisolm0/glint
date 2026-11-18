@@ -95,6 +95,7 @@ component Glint
   // Settings, kept across launches.
   state copyAfter = true persist
   state quickAfter = true persist
+  state editorAfter = true persist
   state recFormat = "mp4" persist
   state recCursor = true persist
   state recClicks = true persist
@@ -131,6 +132,8 @@ component Glint
   state nextPath = ""
   state nextKind = ""
   state copyNext = false
+  // Escape asked to put the window away once the save it started is done.
+  state closeNext = false
   state tool = "arrow"
   state color = "#ff3b30"
   state level = 2
@@ -286,6 +289,8 @@ component Glint
           send copied = copyCapture(c.shown, c.kind)
         if quickAfter
           send shown = showQuick(c.shown, c.kind)
+        if editorAfter
+          focus()
       case none
         note = ""
   action afterRead
@@ -487,17 +492,32 @@ component Glint
           selected = c.path
         copyNext = false
         nextPath = ""
+        if closeNext
+          closeNext = false
+          hideWindow()
       case none
         exporting = false
         nextPath = ""
         copyNext = false
+        closeNext = false
   // Back to the marks as last saved.
   action revert
     annotate(editing)
-  // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text.
+  // Copy what is shown, saving unsaved marks first, and put the window away.
+  action done
+    if dirty and editing != ""
+      closeNext = true
+      copy()
+    else
+      copy()
+      hideWindow()
+  // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text, or is done.
   action editKey(key: string, e: KeyboardEvent)
     if key == "Escape"
-      textOn = false
+      if textOn
+        textOn = false
+      else
+        done()
     else
       if editing != "" and not textOn and not e.metaKey and not e.ctrlKey and not e.altKey
         if key == "a"
@@ -528,6 +548,8 @@ component Glint
     copyAfter = checked
   action flipQuick(checked: bool)
     quickAfter = checked
+  action flipEditor(checked: bool)
+    editorAfter = checked
   action flipCursor(checked: bool)
     recCursor = checked
   action flipClicks(checked: bool)
@@ -593,6 +615,9 @@ component Glint
           row gap=6 align-items="center"
             input type="checkbox" checked=copyAfter change=flipCopy aria-label="Copy to the clipboard" testId="set-copy"
             text "Copy to the clipboard" font-size=12
+          row gap=6 align-items="center"
+            input type="checkbox" checked=editorAfter change=flipEditor aria-label="Open in the editor" testId="set-editor"
+            text "Open in the editor" font-size=12
           if onMac
             row gap=6 align-items="center"
               input type="checkbox" checked=quickAfter change=flipQuick aria-label="Show the floating thumbnail" testId="set-quick"

@@ -32,6 +32,7 @@ final class Picker {
 
     func start(_ done: @escaping (Pick?) -> Void) {
         self.done = done
+        Cursor.inBackground()
         targets = Self.windows()
         let mouse = NSEvent.mouseLocation
         for screen in NSScreen.screens {
@@ -56,6 +57,7 @@ final class Picker {
         self.done = nil
         overlays.forEach { $0.orderOut(nil) }
         overlays = []
+        NSCursor.arrow.set()
         done(pick)
     }
 
@@ -95,6 +97,18 @@ final class Picker {
             return Target(id: id, frame: frame, owner: info[kCGWindowOwnerName as String] as? String ?? "",
                           pid: info[kCGWindowOwnerPID as String] as? pid_t ?? 0)
         }
+    }
+}
+
+/// The window server ignores a background app's cursor, and the overlay never activates Glint, so the active app's
+/// cursor stays until this private connection property lets Glint's `NSCursor.set()` through.
+private enum Cursor {
+    @_silgen_name("_CGSDefaultConnection") private static func connection() -> Int32
+    @_silgen_name("CGSSetConnectionProperty") private static func set(_ cid: Int32, _ target: Int32, _ key: CFString, _ value: CFTypeRef) -> Int32
+
+    static func inBackground() {
+        let cid = connection()
+        _ = set(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
     }
 }
 
