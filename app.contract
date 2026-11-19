@@ -505,19 +505,24 @@ component Glint
     annotate(editing)
   // Copy what is shown, saving unsaved marks first, and put the window away.
   action done
-    if dirty and editing != ""
+    if pending(saved)
+      copyNext = true
       closeNext = true
-      copy()
     else
-      copy()
-      hideWindow()
+      if dirty and editing != ""
+        closeNext = true
+        copy()
+      else
+        copy()
+        hideWindow()
   // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text, or is done.
   action editKey(key: string, e: KeyboardEvent)
     if key == "Escape"
       if textOn
         textOn = false
       else
-        done()
+        if not e.repeat
+          done()
     else
       if editing != "" and not textOn and not e.metaKey and not e.ctrlKey and not e.altKey
         if key == "a"
