@@ -518,13 +518,15 @@ component Glint
         copy()
         hideWindow()
   // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text, or is done.
+  // Settings takes its own Escape.
   action editKey(key: string, e: KeyboardEvent)
     if key == "Escape"
-      if textOn
-        textOn = false
-      else
-        if not e.repeat and not settingsOpen
-          done()
+      if not settingsOpen
+        if textOn
+          textOn = false
+        else
+          if not e.repeat
+            done()
     else
       if editing != "" and not textOn and not e.metaKey and not e.ctrlKey and not e.altKey
         if key == "a"

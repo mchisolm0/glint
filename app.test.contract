@@ -145,7 +145,12 @@ test "Escape in Settings only closes Settings"
   tap "screen"
   clock data
   tap "ink" drag 120 60
+  tap "tool-text"
+  tap "ink"
+  type "text-entry" "Draft"
   tap "settings-button"
   type "set-copy" key "Escape"
   clock data
   expect state dirty == true
+  expect state textOn == true
+  expect state settingsOpen == false
