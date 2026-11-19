@@ -134,6 +134,8 @@ component Glint
   state copyNext = false
   // Escape asked to put the window away once the save it started is done.
   state closeNext = false
+  // Escape there closes the popover, not the window.
+  state settingsOpen = false
   state tool = "arrow"
   state color = "#ff3b30"
   state level = 2
@@ -521,7 +523,7 @@ component Glint
       if textOn
         textOn = false
       else
-        if not e.repeat
+        if not e.repeat and not settingsOpen
           done()
     else
       if editing != "" and not textOn and not e.metaKey and not e.ctrlKey and not e.altKey
@@ -555,6 +557,8 @@ component Glint
     quickAfter = checked
   action flipEditor(checked: bool)
     editorAfter = checked
+  action settingsToggled(e: ToggleEvent)
+    settingsOpen = e.newState == "open"
   action flipCursor(checked: bool)
     recCursor = checked
   action flipClicks(checked: bool)
@@ -615,7 +619,7 @@ component Glint
         text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey, scrollKey, windowKey, onLinux)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
         button popovertarget="settings" aria-label="Settings" testId="settings-button"
           image "symbol:settings" width=14 height=14
-        column id="settings" popover="auto" color-scheme="dark" padding=12 gap=8 testId="settings"
+        column id="settings" popover="auto" toggle=settingsToggled color-scheme="dark" padding=12 gap=8 testId="settings"
           text "After a capture" font-size=11 color="-exact-secondary-label"
           row gap=6 align-items="center"
             input type="checkbox" checked=copyAfter change=flipCopy aria-label="Copy to the clipboard" testId="set-copy"

@@ -140,3 +140,12 @@ test "Escape saves unsaved marks and copies the picture"
   expect state dirty == false
   expect state current.edited == true
   expect text "status-line" == "Saved and copied"
+
+test "Escape in Settings only closes Settings"
+  tap "screen"
+  clock data
+  tap "ink" drag 120 60
+  tap "settings-button"
+  type "set-copy" key "Escape"
+  clock data
+  expect state dirty == true
