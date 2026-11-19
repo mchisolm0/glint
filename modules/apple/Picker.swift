@@ -32,6 +32,7 @@ final class Picker {
 
     func start(_ done: @escaping (Pick?) -> Void) {
         self.done = done
+        Cursor.inBackground()
         targets = Self.windows()
         let mouse = NSEvent.mouseLocation
         for screen in NSScreen.screens {
@@ -56,6 +57,7 @@ final class Picker {
         self.done = nil
         overlays.forEach { $0.orderOut(nil) }
         overlays = []
+        NSCursor.arrow.set()
         done(pick)
     }
 
@@ -97,6 +99,18 @@ final class Picker {
         }
     }
 }
+
+/// The window server ignores a background app's cursor, and the overlay never activates Glint, so the active app's
+/// cursor stays until this private connection property lets Glint's `NSCursor.set()` through.
+private enum Cursor {
+    static func inBackground() {
+        let cid = CGSDefaultConnection()
+        _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+    }
+}
+
+@_silgen_name("_CGSDefaultConnection") private func CGSDefaultConnection() -> Int32
+@_silgen_name("CGSSetConnectionProperty") private func CGSSetConnectionProperty(_ cid: Int32, _ target: Int32, _ key: CFString, _ value: CFTypeRef) -> Int32
 
 /// A borderless panel refuses key status by default, and the overlay needs it for Escape and Space. Being
 /// non-activating, it takes keys without activating Glint, so Glint's other windows stay where they are.

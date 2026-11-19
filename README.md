@@ -13,7 +13,8 @@ on the Mac and the desktop portal on Linux.
 | 1 | Scrolling capture: pick an area, scroll it, then Done (or Hyper+1 again) |
 | T | Capture text (OCR) to the clipboard |
 
-After a capture: it is copied, and a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out). Every
+After a capture: it is copied, a thumbnail floats bottom-left (copy, save, annotate, pin, drag it out), and the window
+comes forward on it (Settings, "Open in the editor"). Escape copies it, saving marks first, and puts the window away. Every
 screenshot opens in the editor, no mode to enter: A arrow, R box, O ellipse, L line, P pen, H highlighter, T text,
 B pixelate, N numbered steps, S spotlight, C crop, and a background. It saves at the picture's own pixels and stays
 editable; Copy saves unsaved marks first, and so does moving to another capture. Recordings are MP4 (system audio and the

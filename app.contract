@@ -95,6 +95,7 @@ component Glint
   // Settings, kept across launches.
   state copyAfter = true persist
   state quickAfter = true persist
+  state editorAfter = true persist
   state recFormat = "mp4" persist
   state recCursor = true persist
   state recClicks = true persist
@@ -131,6 +132,10 @@ component Glint
   state nextPath = ""
   state nextKind = ""
   state copyNext = false
+  // Escape asked to put the window away once the save it started is done.
+  state closeNext = false
+  // Escape there closes the popover, not the window.
+  state settingsOpen = false
   state tool = "arrow"
   state color = "#ff3b30"
   state level = 2
@@ -286,6 +291,8 @@ component Glint
           send copied = copyCapture(c.shown, c.kind)
         if quickAfter
           send shown = showQuick(c.shown, c.kind)
+        if editorAfter
+          focus()
       case none
         note = ""
   action afterRead
@@ -487,17 +494,39 @@ component Glint
           selected = c.path
         copyNext = false
         nextPath = ""
+        if closeNext
+          closeNext = false
+          hideWindow()
       case none
         exporting = false
         nextPath = ""
         copyNext = false
+        closeNext = false
   // Back to the marks as last saved.
   action revert
     annotate(editing)
-  // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text.
+  // Copy what is shown, saving unsaved marks first, and put the window away.
+  action done
+    if pending(saved)
+      copyNext = true
+      closeNext = true
+    else
+      if dirty and editing != ""
+        closeNext = true
+        copy()
+      else
+        copy()
+        hideWindow()
+  // Single keys pick tools while the editor is open and no text is being typed; Escape drops the text, or is done.
+  // Settings takes its own Escape.
   action editKey(key: string, e: KeyboardEvent)
     if key == "Escape"
-      textOn = false
+      if not settingsOpen
+        if textOn
+          textOn = false
+        else
+          if not e.repeat
+            done()
     else
       if editing != "" and not textOn and not e.metaKey and not e.ctrlKey and not e.altKey
         if key == "a"
@@ -528,6 +557,10 @@ component Glint
     copyAfter = checked
   action flipQuick(checked: bool)
     quickAfter = checked
+  action flipEditor(checked: bool)
+    editorAfter = checked
+  action settingsToggled(e: ToggleEvent)
+    settingsOpen = e.newState == "open"
   action flipCursor(checked: bool)
     recCursor = checked
   action flipClicks(checked: bool)
@@ -588,11 +621,14 @@ component Glint
         text (problem != "" ? problem : note != "" ? note : keysLine(screenKey, areaKey, recordKey, textKey, scrollKey, windowKey, onLinux)) flex=1 font-size=11 color=(problem != "" ? "-exact-system-red" : "-exact-secondary-label") testId="status-line"
         button popovertarget="settings" aria-label="Settings" testId="settings-button"
           image "symbol:settings" width=14 height=14
-        column id="settings" popover="auto" color-scheme="dark" padding=12 gap=8 testId="settings"
+        column id="settings" popover="auto" toggle=settingsToggled color-scheme="dark" padding=12 gap=8 testId="settings"
           text "After a capture" font-size=11 color="-exact-secondary-label"
           row gap=6 align-items="center"
             input type="checkbox" checked=copyAfter change=flipCopy aria-label="Copy to the clipboard" testId="set-copy"
             text "Copy to the clipboard" font-size=12
+          row gap=6 align-items="center"
+            input type="checkbox" checked=editorAfter change=flipEditor aria-label="Open in the editor" testId="set-editor"
+            text "Open in the editor" font-size=12
           if onMac
             row gap=6 align-items="center"
               input type="checkbox" checked=quickAfter change=flipQuick aria-label="Show the floating thumbnail" testId="set-quick"
